@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Add a shared BFF Demo exchange over the existing transactional vault, with
+  memory/durable adapters injected by the owning application. Synthetic card
+  directory and call Communications no longer require a GW or a parallel store.
+- Add a bounded, credential-authenticated peer-BFF transport locked to a
+  server-configured Demo scope. Reject placeholder credentials, wrong scopes,
+  expired/revoked generations and unauthorized participants.
+- Enforce call identity, terminal-state and idempotency invariants in the vault
+  transaction, including same-clock transitions and cross-subject call-ID
+  collisions. Keep GW asynchronous correlation and real authority untouched.
+
 ## 0.1.22 - 2026-11-07
 
 - Add an atomic vault capability and a process-owned memory adapter over the

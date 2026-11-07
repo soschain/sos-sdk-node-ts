@@ -24,6 +24,29 @@ begins only after exact registry packages are installed and verified.
 
 Product-neutral Node adapters for trusted SOSCHAIN runtimes.
 
+## BFF-owned synthetic Demo exchange
+
+`PortalDemoExchange` receives the existing transactional Confidential Storage
+vault. It stores synthetic card discovery records and call events as
+Communications, enforces expiry/generation, participant and state-transition
+checks, and never contacts GW, Chat or a media provider. Call IDs are bound
+across the selected scope; retries cannot overwrite another subject or replay
+a terminal transition.
+
+One owning BFF injects memory locally or its configured durable adapter.
+`PortalDemoExchangeClient` lets another trusted BFF use that same state through
+`createPortalDemoExchangeHandler`, rather than creating a second process-local
+store. The handler requires a private service credential, compares it in
+constant time, rejects placeholder credentials, bounds requests to 32 KiB and
+locks requests to its configured non-production Demo scope. Credentials never
+enter browser props. The caller BFF must first verify the account, PIN profile,
+sector/role capability and subject scope; a service credential does not prove
+professional authority. Normal Test Network use cases retain their GW path.
+
+LiveKit receives separate short-lived participant grants. RTC credentials,
+tokens, signaling and media do not belong in Communication history. Optional
+Terminology, media and assistant services remain independent use-case gates.
+
 `secure-organization-registration` owns the trusted Node transport used after
 an application has been reviewed: deterministic reconstruction of the exact
 controller bootstrap wallet, encrypted organization verification or credential
