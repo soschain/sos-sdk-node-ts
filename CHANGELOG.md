@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-11-07
 
 - Add a shared BFF Demo exchange over the existing transactional vault, with
   memory/durable adapters injected by the owning application. Synthetic card

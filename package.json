@@ -1,6 +1,6 @@
 {
   "name": "sos-sdk-node-ts",
-  "version": "0.1.22",
+  "version": "0.2.0",
   "description": "Product-neutral Node adapters shared by SOSChain, Vet and UHC runtimes",
   "license": "Apache-2.0",
   "author": "Connecting Solution & Applications Ltd",
