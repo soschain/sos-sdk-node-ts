@@ -96,8 +96,10 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
             :(()=>{throw new Error('demo_exchange_operation_invalid')})()
       return Response.json({result:result??null})
     } catch(error) {
-      const code=error instanceof Error?error.message:'demo_exchange_failed'
-      const status=code==='demo_card_not_found'?404:/forbidden|required|identity_mismatch/u.test(code)?403:/transition_invalid/u.test(code)?409:400
+      const message=error instanceof Error?error.message:''
+      const code=/^(?:demo_|portal_rtc_)[a-z0-9_]+$/u.test(message)?message
+        :error instanceof SyntaxError||error instanceof TypeError?'demo_exchange_request_invalid':'demo_exchange_failed'
+      const status=code==='demo_exchange_failed'?502:code==='demo_card_not_found'?404:/forbidden|required|identity_mismatch/u.test(code)?403:/transition_invalid/u.test(code)?409:400
       return Response.json({error:code},{status})
     }
   }

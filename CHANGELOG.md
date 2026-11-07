@@ -11,6 +11,8 @@
 - Enforce call identity, terminal-state and idempotency invariants in the vault
   transaction, including same-clock transitions and cross-subject call-ID
   collisions. Keep GW asynchronous correlation and real authority untouched.
+- Return bounded error codes without reflecting malformed request contents or
+  provider exception messages in the peer response.
 
 ## 0.1.22 - 2026-11-07
 

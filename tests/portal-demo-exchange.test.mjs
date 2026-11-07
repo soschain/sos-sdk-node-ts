@@ -61,6 +61,8 @@ test('rejects missing service credentials before touching vault state',async()=>
   assert.equal((await handler(new Request('http://localhost/api/internal/demo/exchange',{method:'POST',body:'{}'}))).status,401)
   const response=await handler(new Request('http://localhost/api/internal/demo/exchange',{method:'POST',headers:{authorization:'Bearer fixture-service-token-at-least-32-characters'},body:JSON.stringify({operation:'resolveCard',scope:other,cardNumber:card.cardNumber})}))
   assert.equal(response.status,403)
+  const malformed=await handler(new Request('http://localhost/api/internal/demo/exchange',{method:'POST',headers:{authorization:'Bearer fixture-service-token-at-least-32-characters'},body:'private-input-not-json'}))
+  assert.deepEqual(await malformed.json(),{error:'demo_exchange_request_invalid'})
 })
 
 test('serializes same-clock transitions and makes the same terminal retry idempotent',async()=>{
