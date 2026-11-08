@@ -2,11 +2,16 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-11-08
+
 - Allow trusted BFF card registration and generation revocation to join a caller-owned vault transaction,
   so the synthetic directory and existing workspace commit or roll back
   together. Keep standalone registration and collision checks unchanged.
 - Three focused cases prove creation/reset rollback, retry without duplication and
   retained standalone collision denial. No RTC browser gate is repeated for this change.
+- Validation: 59 SDK tests pass, plus the consuming Personal BFF's six
+  phone-only Demo creation/retry/reload browser journeys across its three
+  configured presentation flavours and desktop/light plus mobile/dark.
 
 ## 0.2.0 - 2026-11-07
 
