@@ -1,6 +1,6 @@
 import { createPublicKey, verify } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
-import { buildProfessionalDidWeb } from 'gdc-common-utils-ts/utils/did'
+import { buildOrganizationEmployeeDidWeb, buildStableActorIdentifier, normalizeActorContact, type ActorContactInput } from 'antifraud-data-utils-ts/organization-identity'
 import { getHealthcareProfessionalRolesBySector } from 'gdc-common-utils-ts/constants/healthcare'
 import type { DataspaceSector } from 'gdc-common-utils-ts/constants/sectors'
 
@@ -21,6 +21,27 @@ export type PortableProfessionalEnrollment = Readonly<{
   jurisdiction: string
   role: string
 }>
+
+/** The owning BFF verifies possession; this SDK input does not verify an ID token. */
+export type PortableProfessionalVerifiedContactInput = Readonly<{
+  verifiedContact?: ActorContactInput
+  /** Retained email-only caller compatibility; do not supply both inputs. */
+  verifiedEmail?: unknown
+}>
+
+function verifiedContact(input: PortableProfessionalVerifiedContactInput): ActorContactInput {
+  if (input.verifiedEmail !== undefined && input.verifiedEmail !== null && typeof input.verifiedEmail !== 'string') {
+    throw new TypeError('professional_verified_contact_invalid')
+  }
+  const legacyEmail = text(input.verifiedEmail)
+  if (input.verifiedContact !== undefined) {
+    if (legacyEmail) throw new TypeError('professional_verified_contact_ambiguous')
+    if (!input.verifiedContact || typeof input.verifiedContact !== 'object') throw new TypeError('professional_verified_contact_invalid')
+    return { contactKind: input.verifiedContact.contactKind, contact: normalizeActorContact(input.verifiedContact) }
+  }
+  if (!legacyEmail) throw new TypeError('verified_email_required')
+  return { contactKind: 'email', contact: normalizeActorContact({ contactKind: 'email', contact: legacyEmail }) }
+}
 
 const EMPLOYEE_AUTHORIZATION_URN_PATTERN =
   /^urn:cds-([a-z]{2}(?:-[a-z0-9]{2,3})?):v[1-9][0-9]*:organization:([a-z][a-z0-9-]*):([^:]+):member:(z[1-9A-HJ-NP-Za-km-z]+):([0-9]+)$/i
@@ -68,12 +89,11 @@ async function resolveProviderDid(provider: PortableProfessionalProvider, fetchI
  * only reconstruct routing; the authoritative employee DID and authorization
  * URN still determine every returned role.
  */
-export async function resolvePortableProfessionalOrganizationEnrollments(input: Readonly<{
+export async function resolvePortableProfessionalOrganizationEnrollments(input: PortableProfessionalVerifiedContactInput & Readonly<{
   country: unknown
   region?: unknown
   organizationIdentifier: unknown
   sector: unknown
-  verifiedEmail: unknown
   providers: readonly PortableProfessionalProvider[]
   fetchImpl?: typeof fetch
 }>): Promise<readonly PortableProfessionalEnrollment[]> {
@@ -82,7 +102,6 @@ export async function resolvePortableProfessionalOrganizationEnrollments(input: 
   const jurisdiction = region || country
   const organizationIdentifier = text(input.organizationIdentifier)
   const sector = text(input.sector).toLowerCase()
-  const verifiedEmail = text(input.verifiedEmail).toLowerCase()
   if (!/^[A-Z]{2}$/.test(country)) throw new TypeError('professional_country_invalid')
   if (region && (!new RegExp(`^${country}-[A-Z0-9]{1,3}$`).test(region))) {
     throw new TypeError('professional_region_country_mismatch')
@@ -90,7 +109,8 @@ export async function resolvePortableProfessionalOrganizationEnrollments(input: 
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$/.test(organizationIdentifier)) {
     throw new TypeError('professional_organization_identifier_invalid')
   }
-  if (!verifiedEmail) throw new TypeError('verified_email_required')
+  const contact = verifiedContact(input)
+  const expectedMemberId = buildStableActorIdentifier(contact).slice('urn:multibase:'.length)
   const roleCatalog = getHealthcareProfessionalRolesBySector(sector as DataspaceSector)
   const roles = Object.values(roleCatalog).filter(role => role.claim.startsWith('ISCO-08|'))
   if (!roles.length) throw new TypeError('professional_sector_not_allowed')
@@ -105,9 +125,9 @@ export async function resolvePortableProfessionalOrganizationEnrollments(input: 
   const providerDid = await resolveProviderDid(provider, fetchImpl)
   const results: PortableProfessionalEnrollment[] = []
   for (const role of roles) {
-    const professionalDid = buildProfessionalDidWeb({
+    const professionalDid = buildOrganizationEmployeeDidWeb({
       organizationDidWeb: providerDid,
-      email: verifiedEmail,
+      ...contact,
       role: role.claim,
     })
     const memberPath = professionalDid.slice(`${providerDid}:employee:`.length)
@@ -124,6 +144,7 @@ export async function resolvePortableProfessionalOrganizationEnrollments(input: 
     if (!authorization
       || authorization[1].toUpperCase() !== jurisdiction
       || authorization[3] !== organizationIdentifier
+      || authorization[4] !== expectedMemberId
       || authorization[5] !== role.code) {
       throw new TypeError('professional_credential_binding_invalid')
     }
@@ -305,18 +326,17 @@ export async function resolveProfessionalShcEnrollment(input: Readonly<{
  * server-owned provider configuration. The result still requires the host
  * profile manager to perform licence, contact and device-registration checks.
  */
-export async function resolvePortableProfessionalEnrollment(input: Readonly<{
+export async function resolvePortableProfessionalEnrollment(input: PortableProfessionalVerifiedContactInput & Readonly<{
   professionalIdentifier: unknown
   sectorHint: unknown
-  verifiedEmail: unknown
   providers: readonly PortableProfessionalProvider[]
   fetchImpl?: typeof fetch
 }>): Promise<PortableProfessionalEnrollment> {
   const professionalIdentifier = text(input.professionalIdentifier)
   const sectorHint = text(input.sectorHint).toLowerCase()
-  const verifiedEmail = text(input.verifiedEmail).toLowerCase()
   if (!/^[a-z][a-z0-9-]*$/.test(sectorHint)) throw new TypeError('professional_sector_hint_required')
-  if (!verifiedEmail) throw new TypeError('verified_email_required')
+  const contact = verifiedContact(input)
+  const expectedMemberId = buildStableActorIdentifier(contact).slice('urn:multibase:'.length)
 
   const fetchImpl = input.fetchImpl ?? fetch
   let employeeAuthorizationUrn = professionalIdentifier
@@ -343,6 +363,7 @@ export async function resolvePortableProfessionalEnrollment(input: Readonly<{
     authorization = EMPLOYEE_AUTHORIZATION_URN_PATTERN.exec(employeeAuthorizationUrn)
   }
   if (!authorization) throw new TypeError('professional_credential_invalid')
+  if (authorization[4] !== expectedMemberId) throw new TypeError('professional_credential_binding_invalid')
 
   const [, authorizationJurisdiction, , organizationOfficialId, , authorizationRoleCode] = authorization
   const matches = input.providers.filter(provider => provider.tenantId === organizationOfficialId
@@ -355,7 +376,10 @@ export async function resolvePortableProfessionalEnrollment(input: Readonly<{
   const gatewayBaseUrl = new URL(provider.baseUrl).origin
   const providerDid = await resolveProviderDid(provider, fetchImpl)
   const role = `ISCO-08|${authorizationRoleCode}`
-  const professionalDid = buildProfessionalDidWeb({ organizationDidWeb: providerDid, email: verifiedEmail, role })
+  const professionalDid = buildOrganizationEmployeeDidWeb({ organizationDidWeb: providerDid, ...contact, role })
+  if (professionalIdentifier.startsWith('did:web:') && professionalIdentifier !== professionalDid) {
+    throw new TypeError('professional_credential_binding_invalid')
+  }
   return Object.freeze({
     sector: provider.sector,
     employeeAuthorizationUrn,

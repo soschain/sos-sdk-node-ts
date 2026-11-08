@@ -4,6 +4,7 @@ import { generateKeyPairSync, sign } from 'node:crypto'
 import { deflateRawSync } from 'node:zlib'
 import test from 'node:test'
 import { buildProfessionalDidWeb } from 'gdc-common-utils-ts/utils/did'
+import { buildStableActorIdentifier } from 'gdc-common-utils-ts/utils/actor-identifier'
 import { HealthcareActorRoles } from 'gdc-common-utils-ts/constants/healthcare'
 import { EXAMPLE_SECONDARY_EU_COUNTRY } from 'gdc-common-utils-ts/examples'
 import {
@@ -14,7 +15,9 @@ import {
 } from '../dist/portable-professional-evidence.js'
 
 // These deliberately synthetic values exercise the exact governed wire shapes.
-const authorizationUrn = 'urn:cds-ca-bc:v1:organization:bn:Example-123:member:zJJPb9sJCAcnFLu8tVHGF4c:2250'
+const verifiedProfessionalEmail = 'licensed@example.test'
+const memberId = buildStableActorIdentifier({ contactKind: 'email', contact: verifiedProfessionalEmail }).slice('urn:multibase:'.length)
+const authorizationUrn = `urn:cds-ca-bc:v1:organization:bn:Example-123:member:${memberId}:2250`
 const provider = Object.freeze({
   baseUrl: 'https://gateway.example',
   tenantId: 'Example-123',
@@ -23,7 +26,6 @@ const provider = Object.freeze({
 })
 const providerDid = 'did:web:authority.example:Example-123:cds-CA-BC:v1:animal-care'
 const providerCountry = provider.jurisdiction.split('-')[0]
-const verifiedProfessionalEmail = 'licensed@example.test'
 
 test('derives only a trusted-host provider candidate from portable routing evidence', () => {
   assert.deepEqual(derivePortableProfessionalProviderCandidates({
@@ -117,7 +119,7 @@ test('rejects a regional jurisdiction that does not belong to the selected count
 })
 
 test('resolves a professional DID only through its authoritative DID document', async () => {
-  const professionalDid = `${providerDid}:employee:zLicensedEmailHash:ISCO-08|2250`
+  const professionalDid = buildProfessionalDidWeb({ organizationDidWeb: providerDid, email: verifiedProfessionalEmail, role: HealthcareActorRoles.Veterinarian })
   const requested = []
   const result = await resolvePortableProfessionalEnrollment({
     professionalIdentifier: professionalDid,
@@ -135,7 +137,7 @@ test('resolves a professional DID only through its authoritative DID document', 
     },
   })
 
-  assert.match(requested[0], /\/employee\/zLicensedEmailHash\/ISCO-08%7C2250\/did\.json$/)
+  assert.equal(requested[0], `https://gateway.example/Example-123/cds-CA-BC/v1/animal-care/employee/${memberId}/ISCO-08%7C2250/did.json`)
   assert.equal(result.employeeAuthorizationUrn, authorizationUrn)
 })
 
@@ -149,7 +151,7 @@ test('verifies a signed professional SHC before extracting its existing authoriz
       resourceType: 'Bundle',
       entry: [
         { resource: { resourceType: 'Organization', identifier: [{ value: 'Example-123' }] } },
-        { resource: { resourceType: 'Practitioner', identifier: [{ value: 'did:web:authority.example:employee:zHash:ISCO-08|2250' }] } },
+        { resource: { resourceType: 'Practitioner', identifier: [{ value: buildProfessionalDidWeb({ organizationDidWeb: providerDid, email: verifiedProfessionalEmail, role: HealthcareActorRoles.Veterinarian }) }] } },
         { resource: { resourceType: 'PractitionerRole', active: true, identifier: [{ value: authorizationUrn }], practitioner: { reference: 'resource:1' }, organization: { reference: 'resource:0' } } },
       ],
     } } },

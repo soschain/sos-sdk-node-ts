@@ -118,11 +118,23 @@ rejects removed animal-card DID layouts before UI mapping. See
 
 `sos-sdk-node-ts/portable-professional-evidence` lets a trusted BFF discover
 existing professional roles from an exact configured provider using country,
-optional ISO 3166-2 region, organization legal identifier, sector and verified
-email. It derives candidate employee DIDs only from the governed role catalog
+optional ISO 3166-2 region, organization legal identifier, sector and one
+BFF-verified contact. Supply `verifiedContact: { contactKind: 'phone', contact }`
+for a phone, or the corresponding `email` channel. The previous `verifiedEmail`
+input remains supported separately; supplying both identities fails. The BFF,
+not this data argument, verifies the identity-provider token and contact binding.
+The shared Antifraud identity builder preserves the existing actor hash/DID.
+It derives candidate employee DIDs only from the governed role catalog
 and returns a role only when the authoritative employee DID document binds the
 expected authorization URN. These routing inputs and a later browser role
 choice grant no authority by themselves.
+
+Resolution checks that the authorization URN's member hash identifies the
+selected contact and that a fetched employee DID agrees with that contact and
+the URN role. Direct authorization-URN resolution still checks routing and
+provider context; it is not signature verification or proof that the employee
+licence exists. Enrollment and the gateway retain those authority checks.
+Technical-sector role catalogues remain unchanged in this resolver batch.
 
 `sos-sdk-node-ts/host-organization-directory-client` is the separate trusted-
 BFF client for a host operator's organization directory. It sends the
