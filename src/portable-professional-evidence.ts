@@ -1,6 +1,6 @@
 import { createPublicKey, verify } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
-import { buildOrganizationEmployeeDidWeb, buildStableActorIdentifier, normalizeActorContact, type ActorContactInput } from 'antifraud-data-utils-ts/organization-identity'
+import { buildOrganizationEmployeeDidWeb, normalizeActorContact, type ActorContactInput } from 'antifraud-data-utils-ts/organization-identity'
 import { getHealthcareProfessionalRolesBySector } from 'gdc-common-utils-ts/constants/healthcare'
 import type { DataspaceSector } from 'gdc-common-utils-ts/constants/sectors'
 
@@ -11,6 +11,7 @@ export type PortableProfessionalProvider = Readonly<{
   sector: string
 }>
 
+/** Routing metadata only; GW contact, licence and device checks still precede enrollment. */
 export type PortableProfessionalEnrollment = Readonly<{
   sector: string
   employeeAuthorizationUrn: string
@@ -43,6 +44,8 @@ function verifiedContact(input: PortableProfessionalVerifiedContactInput): Actor
   return { contactKind: 'email', contact: normalizeActorContact({ contactKind: 'email', contact: legacyEmail }) }
 }
 
+// The member component encodes the employee's 16-byte UUID as base58btc.
+// It is not the stable SHA3-256 contact identifier used in an employee did:web.
 const EMPLOYEE_AUTHORIZATION_URN_PATTERN =
   /^urn:cds-([a-z]{2}(?:-[a-z0-9]{2,3})?):v[1-9][0-9]*:organization:([a-z][a-z0-9-]*):([^:]+):member:(z[1-9A-HJ-NP-Za-km-z]+):([0-9]+)$/i
 
@@ -110,7 +113,6 @@ export async function resolvePortableProfessionalOrganizationEnrollments(input: 
     throw new TypeError('professional_organization_identifier_invalid')
   }
   const contact = verifiedContact(input)
-  const expectedMemberId = buildStableActorIdentifier(contact).slice('urn:multibase:'.length)
   const roleCatalog = getHealthcareProfessionalRolesBySector(sector as DataspaceSector)
   const roles = Object.values(roleCatalog).filter(role => role.claim.startsWith('ISCO-08|'))
   if (!roles.length) throw new TypeError('professional_sector_not_allowed')
@@ -144,7 +146,6 @@ export async function resolvePortableProfessionalOrganizationEnrollments(input: 
     if (!authorization
       || authorization[1].toUpperCase() !== jurisdiction
       || authorization[3] !== organizationIdentifier
-      || authorization[4] !== expectedMemberId
       || authorization[5] !== role.code) {
       throw new TypeError('professional_credential_binding_invalid')
     }
@@ -325,6 +326,9 @@ export async function resolveProfessionalShcEnrollment(input: Readonly<{
  * Resolves one organization-issued DID or authorization URN through
  * server-owned provider configuration. The result still requires the host
  * profile manager to perform licence, contact and device-registration checks.
+ * A UUID authorization URN provides routing before DCR; it does not prove its
+ * employee belongs to the selected contact or require an already published
+ * employee DID. Token/_exchange performs that licensed-contact check in GW.
  */
 export async function resolvePortableProfessionalEnrollment(input: PortableProfessionalVerifiedContactInput & Readonly<{
   professionalIdentifier: unknown
@@ -336,7 +340,6 @@ export async function resolvePortableProfessionalEnrollment(input: PortableProfe
   const sectorHint = text(input.sectorHint).toLowerCase()
   if (!/^[a-z][a-z0-9-]*$/.test(sectorHint)) throw new TypeError('professional_sector_hint_required')
   const contact = verifiedContact(input)
-  const expectedMemberId = buildStableActorIdentifier(contact).slice('urn:multibase:'.length)
 
   const fetchImpl = input.fetchImpl ?? fetch
   let employeeAuthorizationUrn = professionalIdentifier
@@ -363,7 +366,6 @@ export async function resolvePortableProfessionalEnrollment(input: PortableProfe
     authorization = EMPLOYEE_AUTHORIZATION_URN_PATTERN.exec(employeeAuthorizationUrn)
   }
   if (!authorization) throw new TypeError('professional_credential_invalid')
-  if (authorization[4] !== expectedMemberId) throw new TypeError('professional_credential_binding_invalid')
 
   const [, authorizationJurisdiction, , organizationOfficialId, , authorizationRoleCode] = authorization
   const matches = input.providers.filter(provider => provider.tenantId === organizationOfficialId

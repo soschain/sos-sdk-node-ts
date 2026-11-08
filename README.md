@@ -129,12 +129,27 @@ and returns a role only when the authoritative employee DID document binds the
 expected authorization URN. These routing inputs and a later browser role
 choice grant no authority by themselves.
 
-Resolution checks that the authorization URN's member hash identifies the
-selected contact and that a fetched employee DID agrees with that contact and
-the URN role. Direct authorization-URN resolution still checks routing and
-provider context; it is not signature verification or proof that the employee
-licence exists. Enrollment and the gateway retain those authority checks.
+These identifiers have distinct jobs:
+
+- The stable actor `urn:multibase:...` hashes a normalized contact with SHA3-256.
+- The operational employee `did:web:...:employee:...:<role>` uses that contact
+  hash and a separate role.
+- The host-independent CDS authorization URN's `member` component encodes the
+  employee UUID's 16 raw bytes as base58btc. It is **not** the contact hash.
+
+For an existing fetched employee DID, resolution requires the selected contact's
+operational DID and the alias's organization, jurisdiction and role to agree.
+Direct UUID authorization-URN resolution remains routing before DCR and performs
+no employee-DID fetch. It does not verify a signature, licence existence or the
+UUID's ownership by the selected contact. The owning profile manager calls
+`Token/_exchange`, where GW resolves the issued licence and verifies its contact,
+organization, employee UUID and role before consuming activation and issuing a
+DCR token. Requiring an employee DID earlier would block legitimate enrollment
+before that operational DID is published.
 Technical-sector role catalogues remain unchanged in this resolver batch.
+Phone routing support does not close the gateway's remaining email-only
+portable licence-resolution guard or the portal's email-only enrollment APIs.
+Those authority paths require their own implementation and real-boundary proof.
 
 `sos-sdk-node-ts/host-organization-directory-client` is the separate trusted-
 BFF client for a host operator's organization directory. It sends the

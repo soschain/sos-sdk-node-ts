@@ -6,19 +6,24 @@
   professional resolution APIs, retaining the separate `verifiedEmail` input
   for compatibility. Use the shared Antifraud identity contract rather than
   placing a phone in an email field or inventing an employee DID.
-- Require the authorization member hash and fetched employee DID/role to
-  identify the selected contact. Earlier resolution could combine another
-  actor's alias or role with a newly derived caller identity. Reject ambiguous
-  contact inputs before provider queries. These consistency checks do not
-  replace gateway licence, role, contact or device authorization.
-- Replace arbitrary legacy test hashes with identifiers derived from the
-  existing published algorithm. The role catalogue, activation grants and
-  managed-wallet proof/enrollment flows remain separate from this batch.
-- Local source validation on Node 26.13.0 passes 15 focused cases, all 67 SDK
-  cases without skips and typechecking, using the immutable Antifraud 0.2.0
-  candidate. The installed graph retains all other baseline versions. The
-  direct registry dependency and exact lockfile remain a release prerequisite;
-  this consumer branch is not ready for main/registry acceptance yet.
+- Bind a fetched operational employee DID to the selected contact and alias
+  role, preserving organization/jurisdiction checks. Reject ambiguous contact
+  inputs before provider queries. Direct UUID authorization URNs remain
+  pre-DCR routing; GW `Token/_exchange` still verifies the issued licence's
+  contact, organization, employee UUID and role before activation/DCR.
+- Correct a development-stage test assumption: a CDS employee authorization
+  URN encodes the employee UUID, not the stable contact hash. Use the published
+  UUID builder for fixtures and prove routing needs no early employee-DID read.
+  Derive operational DID fixtures from the contact separately. No GW identifier
+  format or exchange protocol changes. The earlier 67-case result included
+  incorrect professional fixtures and is superseded by the corrected gate.
+- The role catalogue, activation grants and managed-wallet enrollment remain
+  separate. Direct Antifraud registry dependency and exact lockfile are still
+  release prerequisites; this consumer branch is not main/registry acceptance.
+- Corrected Node 26.13.0 validation passes 15 focused cases, all 67 SDK cases
+  without skips and typechecking using real-format UUID authorization fixtures.
+  The immutable Antifraud 0.2.0 candidate is the only installed package delta;
+  all other baseline package versions and the tracked manifest/lock are retained.
 
 ## 0.2.1 - 2026-11-08
 

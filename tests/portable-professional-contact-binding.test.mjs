@@ -1,8 +1,9 @@
-// Flow contract: a BFF supplies one verified contact to existing portable resolution APIs; the returned organization, employee DID, authorization URN and role must identify that same contact, while discovery alone never grants a licence, profile or device.
+// Flow contract: a BFF supplies one verified contact; published employee DIDs bind that contact while an employee UUID authorization URN remains pre-DCR routing evidence, never a licence, profile, verified contact binding or device grant.
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildStableActorIdentifier, buildPortalActorDidWeb } from 'gdc-common-utils-ts/utils/actor-identifier'
 import { HealthcareActorRoles } from 'gdc-common-utils-ts/constants/healthcare'
+import { buildOrganizationAuthorizationUrnCds, buildOrganizationEmployeeAuthorizationUrnCds } from 'gdc-common-utils-ts/utils/organization-authorization-urn'
 import { REPOSITORY_SAFE_EXAMPLES } from 'sos-data-utils-ts/repository-privacy'
 import { resolvePortableProfessionalEnrollment, resolvePortableProfessionalOrganizationEnrollments } from '../dist/portable-professional-evidence.js'
 
@@ -13,13 +14,21 @@ const fixture = Object.freeze({
   email: REPOSITORY_SAFE_EXAMPLES.individualEmail,
   otherEmail: REPOSITORY_SAFE_EXAMPLES.firstContactEmail,
   role: HealthcareActorRoles.Receptionist,
+  employeeUuid: REPOSITORY_SAFE_EXAMPLES.resourceUuid,
+  otherEmployeeUuid: REPOSITORY_SAFE_EXAMPLES.demoOrganizationUuids.animalTech,
 })
 
-function identity(contactKind, contact, role = fixture.role) {
+function identity(contactKind, contact, role = fixture.role, employeeUuid = fixture.employeeUuid) {
   const actorIdentifier = buildStableActorIdentifier({ contactKind, contact })
   return {
     professionalDid: buildPortalActorDidWeb({ portalDidWeb: fixture.providerDid, actorIdentifier, role }),
-    authorizationUrn: `urn:cds-ca-bc:v1:organization:bn:${fixture.provider.tenantId}:member:${actorIdentifier.slice('urn:multibase:'.length)}:${role.split('|')[1]}`,
+    // The authorization member is the 16-byte employee UUID encoded as base58;
+    // the operational employee DID uses the separate SHA3-256 contact hash.
+    authorizationUrn: buildOrganizationEmployeeAuthorizationUrnCds({
+      organizationUrn: buildOrganizationAuthorizationUrnCds({ jurisdiction: fixture.provider.jurisdiction, identifierType: 'bn', identifierValue: fixture.provider.tenantId }),
+      employeeUuid,
+      roleCode: role.split('|')[1],
+    }),
   }
 }
 
@@ -42,12 +51,21 @@ function directInput(person) {
     providers: [fixture.provider], fetchImpl: providerFetch(person) }
 }
 
-test('resolves a phone-bound authorization URN without an email', async () => {
+test('routes a real UUID authorization URN before DCR without requiring an employee DID or email', async () => {
   const person = identity('phone', fixture.phone)
+  const requested = []
   const result = await resolvePortableProfessionalEnrollment({ ...directInput(person),
-    verifiedContact: { contactKind: 'phone', contact: fixture.phone } })
+    verifiedContact: { contactKind: 'phone', contact: fixture.phone }, fetchImpl: async url => {
+      requested.push(String(url))
+      assert.equal(String(url).includes('/employee/'), false)
+      return providerFetch(person)(url)
+    } })
   assert.equal(result.professionalDid, person.professionalDid)
   assert.equal(result.employeeAuthorizationUrn, person.authorizationUrn)
+  assert.equal(requested.length, 1)
+  assert.notEqual(person.authorizationUrn.split(':member:')[1].split(':')[0], buildStableActorIdentifier({ contactKind: 'phone', contact: fixture.phone }).slice('urn:multibase:'.length))
+  assert.equal(Object.hasOwn(result, 'licenseId'), false)
+  assert.equal(Object.hasOwn(result, 'accessToken'), false)
 })
 
 test('resolves an existing phone employee DID without substituting its identity', async () => {
@@ -69,9 +87,17 @@ test('discovers the existing phone role in a technical-sector organization', asy
   assert.equal(results[0].employeeAuthorizationUrn, person.authorizationUrn)
 })
 
-test('rejects an authorization URN for another contact even with the right organization and role', async () => {
-  const other = identity('email', fixture.otherEmail)
-  await assert.rejects(resolvePortableProfessionalEnrollment({ ...directInput(other), verifiedEmail: fixture.email }), /professional_credential_binding_invalid/)
+test('does not interpret an opaque employee UUID as proof of the selected contact', async () => {
+  const other = identity('email', fixture.otherEmail, fixture.role, fixture.otherEmployeeUuid)
+  const selected = identity('email', fixture.email)
+  const result = await resolvePortableProfessionalEnrollment({ ...directInput(other), verifiedEmail: fixture.email })
+  assert.equal(result.employeeAuthorizationUrn, other.authorizationUrn)
+  assert.equal(result.professionalDid, selected.professionalDid)
+  assert.notEqual(result.professionalDid, other.professionalDid)
+  // Token/_exchange must still verify the UUID's issued licence against the
+  // fresh account contact. Routing metadata is not that authorization result.
+  assert.equal(Object.hasOwn(result, 'authorized'), false)
+  assert.equal(Object.hasOwn(result, 'profile'), false)
 })
 
 test('rejects a fetched employee DID belonging to another verified contact', async () => {
@@ -87,9 +113,9 @@ test('rejects a role mismatch between the fetched DID and its authorization alia
     verifiedEmail: fixture.email, fetchImpl: providerFetch(person, [otherRole.authorizationUrn]) }), /professional_credential_binding_invalid/)
 })
 
-test('rejects organization discovery whose alias names a different contact', async () => {
+test('rejects organization discovery whose authorization alias has the wrong role', async () => {
   const person = identity('email', fixture.email)
-  const other = identity('email', fixture.otherEmail)
+  const other = identity('email', fixture.email, HealthcareActorRoles.Veterinarian)
   await assert.rejects(resolvePortableProfessionalOrganizationEnrollments({
     country: 'CA', region: fixture.provider.jurisdiction, organizationIdentifier: fixture.provider.tenantId,
     sector: fixture.provider.sector, providers: [fixture.provider], fetchImpl: providerFetch(person, [other.authorizationUrn]),

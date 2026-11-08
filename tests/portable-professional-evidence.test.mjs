@@ -5,6 +5,8 @@ import { deflateRawSync } from 'node:zlib'
 import test from 'node:test'
 import { buildProfessionalDidWeb } from 'gdc-common-utils-ts/utils/did'
 import { buildStableActorIdentifier } from 'gdc-common-utils-ts/utils/actor-identifier'
+import { buildOrganizationAuthorizationUrnCds, buildOrganizationEmployeeAuthorizationUrnCds } from 'gdc-common-utils-ts/utils/organization-authorization-urn'
+import { REPOSITORY_SAFE_EXAMPLES } from 'sos-data-utils-ts/repository-privacy'
 import { HealthcareActorRoles } from 'gdc-common-utils-ts/constants/healthcare'
 import { EXAMPLE_SECONDARY_EU_COUNTRY } from 'gdc-common-utils-ts/examples'
 import {
@@ -16,8 +18,7 @@ import {
 
 // These deliberately synthetic values exercise the exact governed wire shapes.
 const verifiedProfessionalEmail = 'licensed@example.test'
-const memberId = buildStableActorIdentifier({ contactKind: 'email', contact: verifiedProfessionalEmail }).slice('urn:multibase:'.length)
-const authorizationUrn = `urn:cds-ca-bc:v1:organization:bn:Example-123:member:${memberId}:2250`
+const actorMemberId = buildStableActorIdentifier({ contactKind: 'email', contact: verifiedProfessionalEmail }).slice('urn:multibase:'.length)
 const provider = Object.freeze({
   baseUrl: 'https://gateway.example',
   tenantId: 'Example-123',
@@ -26,6 +27,12 @@ const provider = Object.freeze({
 })
 const providerDid = 'did:web:authority.example:Example-123:cds-CA-BC:v1:animal-care'
 const providerCountry = provider.jurisdiction.split('-')[0]
+// The authorization member is a UUID encoding, independent of actorMemberId.
+const authorizationUrn = buildOrganizationEmployeeAuthorizationUrnCds({
+  organizationUrn: buildOrganizationAuthorizationUrnCds({ jurisdiction: provider.jurisdiction, identifierType: 'bn', identifierValue: provider.tenantId }),
+  employeeUuid: REPOSITORY_SAFE_EXAMPLES.resourceUuid,
+  roleCode: '2250',
+})
 
 test('derives only a trusted-host provider candidate from portable routing evidence', () => {
   assert.deepEqual(derivePortableProfessionalProviderCandidates({
@@ -137,7 +144,7 @@ test('resolves a professional DID only through its authoritative DID document', 
     },
   })
 
-  assert.equal(requested[0], `https://gateway.example/Example-123/cds-CA-BC/v1/animal-care/employee/${memberId}/ISCO-08%7C2250/did.json`)
+  assert.equal(requested[0], `https://gateway.example/Example-123/cds-CA-BC/v1/animal-care/employee/${actorMemberId}/ISCO-08%7C2250/did.json`)
   assert.equal(result.employeeAuthorizationUrn, authorizationUrn)
 })
 
