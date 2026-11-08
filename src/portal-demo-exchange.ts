@@ -6,6 +6,7 @@ import {buildDemoWorkspaceScope, demoWorkspaceStorageNamespace, type DemoWorkspa
 import {normalizePortalRtcCallEvent, PORTAL_RTC_CALL_CONTENT_TYPE, type PortalRtcCallEvent} from 'sos-data-utils-ts/portal-rtc-call'
 import {buildSubjectCommunicationGroupReference} from 'sos-data-utils-ts/subject-communication-group'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
+import type {IVaultRepository} from 'gdc-common-utils-ts/storage'
 
 /** Minimal synthetic directory projection; it does not convey real subject authority. */
 export type PortalDemoCard = Readonly<{
@@ -20,27 +21,32 @@ type CommunicationRecord = {id:string;callId:string;subjectIdentifier:string;occ
 export class PortalDemoExchange {
   constructor(private readonly options:Readonly<{store:TransactionalVaultRepository;now?:()=>number}>) {}
   private now() {return (this.options.now??Date.now)()}
-  async registerCard(scope:DemoWorkspaceScope,card:PortalDemoCard):Promise<void> {
+  /** A trusted BFF may supply its current transaction to commit workspace and directory together. */
+  async registerCard(scope:DemoWorkspaceScope,card:PortalDemoCard,transaction?:IVaultRepository):Promise<void> {
     const collection=collections(scope).cards
     if (!/^\d{21}$/u.test(card.cardNumber)||!card.subjectIdentifier||!card.controllerActorIdentifier||!card.generationId
       ||!['animal','person'].includes(card.subjectKind)||!Number.isFinite(card.expiresAt)||card.expiresAt<=this.now()) throw new Error('demo_card_invalid')
-    await this.options.store.runTransaction(async store=>{
+    const register=async(store:IVaultRepository)=>{
       const id=hash(card.cardNumber);const existing=await store.get<CardRecord>(collection,id)
       if (existing&&existing.expiresAt>this.now()&&(existing.generationId!==card.generationId||existing.subjectIdentifier!==card.subjectIdentifier)) throw new Error('demo_card_collision')
       await store.put(collection,{...card,id})
-    })
+    }
+    if(transaction) await register(transaction)
+    else await this.options.store.runTransaction(register)
   }
   async resolveCard(scope:DemoWorkspaceScope,cardNumber:string):Promise<PortalDemoCard> {
     const card=await this.options.store.get<CardRecord>(collections(scope).cards,hash(cardNumber))
     if (!card||card.expiresAt<=this.now()) throw new Error('demo_card_not_found')
     const {id:_id,...view}=card;return view
   }
-  async revokeGeneration(scope:DemoWorkspaceScope,generationId:string):Promise<void> {
+  async revokeGeneration(scope:DemoWorkspaceScope,generationId:string,transaction?:IVaultRepository):Promise<void> {
     const collection=collections(scope).cards
-    await this.options.store.runTransaction(async store=>{
+    const revoke=async(store:IVaultRepository)=>{
       const records=await store.query<CardRecord>(collection,{where:[{attribute:'generationId',equals:generationId}]})
       for (const record of records) await store.delete(collection,record.id)
-    })
+    }
+    if(transaction) await revoke(transaction)
+    else await this.options.store.runTransaction(revoke)
   }
   async listEvents(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoParticipant):Promise<PortalRtcCallEvent[]> {
     const names=collections(scope)

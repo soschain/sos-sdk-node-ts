@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Allow trusted BFF card registration and generation revocation to join a caller-owned vault transaction,
+  so the synthetic directory and existing workspace commit or roll back
+  together. Keep standalone registration and collision checks unchanged.
+- Three focused cases prove creation/reset rollback, retry without duplication and
+  retained standalone collision denial. No RTC browser gate is repeated for this change.
+
 ## 0.2.0 - 2026-11-07
 
 - Add a shared BFF Demo exchange over the existing transactional vault, with
