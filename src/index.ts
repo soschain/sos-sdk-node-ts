@@ -17,3 +17,6 @@ export * from './transactional-vault.js';
 export * from './vault-passkey-store.js';
 export * from './portal-demo-exchange.js';
 export * from './employee-activation-grant.js';
+export * from './portal-push-delivery.js';
+export * from './portal-web-push.js';
+export * from './bff-service-bearer.js';

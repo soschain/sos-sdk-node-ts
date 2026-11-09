@@ -1,6 +1,6 @@
 {
   "name": "sos-sdk-node-ts",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Product-neutral Node adapters shared by SOSChain, Vet and UHC runtimes",
   "license": "Apache-2.0",
   "author": "Connecting Solution & Applications Ltd",
@@ -12,6 +12,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./portal-web-push": {
+      "types": "./dist/portal-web-push.d.ts",
+      "default": "./dist/portal-web-push.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
@@ -89,11 +93,14 @@
     "gdc-common-utils-ts": "2.9.30",
     "gdc-sdk-node-ts": "2.9.32",
     "livekit-server-sdk": "2.19.2",
-    "sos-data-utils-ts": "0.6.28",
-    "sos-sdk-core-ts": "0.5.5"
+    "sos-data-utils-ts": "0.6.30",
+    "sos-sdk-core-ts": "0.5.5",
+    "web-push": "4.0.0"
   },
   "devDependencies": {
+    "@peculiar/x509": "1.14.3",
     "@types/node": "^24.10.0",
+    "@types/web-push": "3.6.4",
     "typescript": "^5.9.3"
   },
   "engines": {
