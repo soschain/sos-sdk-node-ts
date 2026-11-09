@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Bind browser push registrations to a verified actor and environment, seal
+  subscription credentials through the injected sealer, and keep explicit
+  per-device jobs, retry leases, revocation and provider acceptance status in
+  the shared transactional vault. Send RFC 8291 Web Push with VAPID and reject
+  private destinations at connection time. Device delivery is not inferred
+  from provider acceptance.
+- Commit Demo call notifications with their Communication and enforce an
+  atomic recipient-session answer claim; sibling sessions cannot obtain a
+  second recipient grant or end the accepted call.
+
+- Index new call Communications by an opaque scoped recipient key and expose
+  recipient-bound notification reads independently of the attended card's
+  ownership or selection. Revoked/expired Demo generations are excluded.
+
+- Resolve call recipients from explicit card emergency contacts independently
+  of controller authority. An empty contact list denies new calls; retained
+  call history keeps its original recipient and Encounter context immutable.
+- Validate contact projections before directory persistence, preserving the
+  existing controller-only compatibility profile for records without contacts.
+
 ## 0.2.1 - 2026-11-08
 
 - Allow trusted BFF card registration and generation revocation to join a caller-owned vault transaction,
