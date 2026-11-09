@@ -16,3 +16,4 @@ export * from './subject-card-provider-catalog-client.js';
 export * from './transactional-vault.js';
 export * from './vault-passkey-store.js';
 export * from './portal-demo-exchange.js';
+export * from './employee-activation-grant.js';
