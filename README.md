@@ -131,6 +131,22 @@ response route and returns the privacy-minimized, paginated Bundle projection.
 The host jurisdiction and network come from trusted server configuration;
 they are never browser-selected authority.
 
+## Recipient devices and browser push
+
+`PortalPushDeliveryService` uses the injected transactional vault and server
+profile sealer to bind browser subscriptions to the verified recipient. The
+BFF supplies scope and actor; browser input cannot select either authority.
+Subscription credentials stay sealed. Per-device notice jobs can commit with
+the call Communication and use bounded retries, leases, expiry and revocation.
+`dispatchScope` supports a trusted worker while recipient pages are closed;
+the host owns worker authentication and scheduling.
+
+`sos-sdk-node-ts/portal-web-push` provides `createPortalWebPushSender` for
+encrypted Web Push with server-only VAPID credentials, approved endpoint
+origins and connection-time rejection of private addresses. Provider acceptance
+is distinct from browser/OS delivery. Native push and email/SMS require their
+own adapters and evidence.
+
 ## Secure-message CSPRNG adapter
 
 `sos-sdk-node-ts/secure-message-crypto` exports `NodeSecureRandomSource` and
