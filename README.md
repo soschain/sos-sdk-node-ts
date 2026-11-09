@@ -118,11 +118,38 @@ rejects removed animal-card DID layouts before UI mapping. See
 
 `sos-sdk-node-ts/portable-professional-evidence` lets a trusted BFF discover
 existing professional roles from an exact configured provider using country,
-optional ISO 3166-2 region, organization legal identifier, sector and verified
-email. It derives candidate employee DIDs only from the governed role catalog
+optional ISO 3166-2 region, organization legal identifier, sector and one
+BFF-verified contact. Supply `verifiedContact: { contactKind: 'phone', contact }`
+for a phone, or the corresponding `email` channel. The previous `verifiedEmail`
+input remains supported separately; supplying both identities fails. The BFF,
+not this data argument, verifies the identity-provider token and contact binding.
+The shared Antifraud identity builder preserves the existing actor hash/DID.
+It derives candidate employee DIDs only from the governed role catalog
 and returns a role only when the authoritative employee DID document binds the
 expected authorization URN. These routing inputs and a later browser role
 choice grant no authority by themselves.
+
+These identifiers have distinct jobs:
+
+- The stable actor `urn:multibase:...` hashes a normalized contact with SHA3-256.
+- The operational employee `did:web:...:employee:...:<role>` uses that contact
+  hash and a separate role.
+- The host-independent CDS authorization URN's `member` component encodes the
+  employee UUID's 16 raw bytes as base58btc. It is **not** the contact hash.
+
+For an existing fetched employee DID, resolution requires the selected contact's
+operational DID and the alias's organization, jurisdiction and role to agree.
+Direct UUID authorization-URN resolution remains routing before DCR and performs
+no employee-DID fetch. It does not verify a signature, licence existence or the
+UUID's ownership by the selected contact. The owning profile manager calls
+`Token/_exchange`, where GW resolves the issued licence and verifies its contact,
+organization, employee UUID and role before consuming activation and issuing a
+DCR token. Requiring an employee DID earlier would block legitimate enrollment
+before that operational DID is published.
+Technical-sector role catalogues remain unchanged in this resolver batch.
+Phone routing support does not close the gateway's remaining email-only
+portable licence-resolution guard or the portal's email-only enrollment APIs.
+Those authority paths require their own implementation and real-boundary proof.
 
 `sos-sdk-node-ts/host-organization-directory-client` is the separate trusted-
 BFF client for a host operator's organization directory. It sends the
