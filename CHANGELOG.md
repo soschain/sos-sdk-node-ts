@@ -17,13 +17,25 @@
   Derive operational DID fixtures from the contact separately. No GW identifier
   format or exchange protocol changes. The earlier 67-case result included
   incorrect professional fixtures and is superseded by the corrected gate.
-- The role catalogue, activation grants and managed-wallet enrollment remain
-  separate. Direct Antifraud registry dependency and exact lockfile are still
-  release prerequisites; this consumer branch is not main/registry acceptance.
+- Add contact-aware `createEmployeeActivationGrant` and
+  `employeeActivationGrantMatchesContact` over the existing V1 grant model.
+  Explicit phone/email inputs produce the existing opaque actor identifier;
+  raw contact, new wire fields and inferred authority are not added. The
+  matcher does not establish identity verification, grant ownership or TTL.
+  The role catalogue and managed-wallet enrollment remain separate.
 - Corrected Node 26.13.0 validation passes 15 focused cases, all 67 SDK cases
   without skips and typechecking using real-format UUID authorization fixtures.
   The immutable Antifraud 0.2.0 candidate is the only installed package delta;
   all other baseline package versions and the tracked manifest/lock are retained.
+- Install published `antifraud-data-utils-ts@0.2.0` as an exact direct registry
+  dependency and retain the incoming 0.2.2 recipient/contact and Web Push work.
+  Align the actual install to the merged lock, including incoming
+  `sos-data-utils-ts@0.6.30`. Verify all 130 installed Antifraud public files
+  against the published artifact; no local package references remain.
+- The combined Node 26.13.0 registry gate passes all 93 SDK tests without skips
+  and typechecking. All 95 installed package versions match the lockfile.
+  This proves the merged SDK contract, not complete portal/GW phone lifecycle,
+  deployed push delivery or the independent clinical/permissions/research gates.
 
 ## 0.2.2 - 2026-11-09
 

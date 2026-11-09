@@ -90,6 +90,7 @@
   },
   "dependencies": {
     "@simplewebauthn/server": "13.3.2",
+    "antifraud-data-utils-ts": "0.2.0",
     "gdc-common-utils-ts": "2.9.30",
     "gdc-sdk-node-ts": "2.9.32",
     "livekit-server-sdk": "2.19.2",
