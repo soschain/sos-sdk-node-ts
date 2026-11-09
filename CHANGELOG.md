@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.2 - 2026-11-09
+
 - Bind browser push registrations to a verified actor and environment, seal
   subscription credentials through the injected sealer, and keep explicit
   per-device jobs, retry leases, revocation and provider acceptance status in
