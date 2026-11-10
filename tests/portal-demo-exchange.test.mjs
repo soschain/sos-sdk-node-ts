@@ -84,3 +84,19 @@ test('does not let a second subject overwrite a call identifier already bound in
   await assert.rejects(exchange.submitEvent(scope,{...event,subjectIdentifier:second.subjectIdentifier},professional),/identity_mismatch/)
   assert.equal((await exchange.listEvents(scope,card.subjectIdentifier,controller)).length,1)
 })
+
+test('resolves displayed numbers and registered DID aliases through the same scoped directory',async()=>{
+  let now=Date.now()
+  const exchange=new PortalDemoExchange({store:new TransactionalMemoryVaultRepository(),now:()=>now})
+  const registered={...card,cardDid:`did:web:example.invalid:card:vetchain:0009615:${card.cardNumber}`}
+  await exchange.registerCard(scope,registered)
+  const grouped=card.cardNumber.replace(/(.{4})/gu,'$1 ').trim()
+  for(const locator of [card.cardNumber,grouped,registered.cardDid,registered.subjectIdentifier]){
+    assert.equal((await exchange.resolveCard(scope,locator)).subjectIdentifier,card.subjectIdentifier)
+    await assert.rejects(exchange.resolveCard(other,locator),/demo_card_not_found/)
+  }
+  await assert.rejects(exchange.resolveCard(scope,registered.cardDid.replace('example.invalid','other.invalid')),/demo_card_not_found/)
+  now=card.expiresAt+1
+  await assert.rejects(exchange.resolveCard(scope,grouped),/demo_card_not_found/)
+  await assert.rejects(exchange.resolveCard(scope,registered.cardDid),/demo_card_not_found/)
+})
