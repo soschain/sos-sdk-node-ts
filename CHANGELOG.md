@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.3 - 2026-11-10
+
 - Prepare `PortalCareVaultProvider` for scoped Appointment, Encounter and Task
   claims, with atomic Communication notices and the existing Tasks SDK engine.
   Add optional peer care operations, revision checks, read acknowledgement and
