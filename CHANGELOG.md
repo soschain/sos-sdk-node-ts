@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Prepare `PortalCareVaultProvider` for scoped Appointment, Encounter and Task
+  claims, with atomic Communication notices and the existing Tasks SDK engine.
+  Add optional peer care operations, revision checks, read acknowledgement and
+  explicit due-job dispatch. The host must supply BFF-validated section access;
+  actual CH provider composition, persistent shared UI, closed-browser delivery
+  and coordinated registry release remain incomplete. No GW/Chat protocol changes.
+
 - Resolve Demo cards from displayed card numbers (spaces or hyphens) and exact
   registered card DID/subject aliases in the owning BFF's existing directory.
   Retain scope and expiry checks, reject ambiguous aliases and never fetch

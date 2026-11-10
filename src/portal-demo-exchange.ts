@@ -9,6 +9,7 @@ import {buildSubjectCommunicationGroupReference} from 'sos-data-utils-ts/subject
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 import type {IVaultRepository} from 'gdc-common-utils-ts/storage'
 import type {SoschainDemoContact,SoschainDemoSubject} from 'sos-data-utils-ts/portal-demo-fixtures'
+import type {PortalCareVaultProvider,PortalCareOperation,PortalCareOperationResult} from './portal-care-vault.js'
 
 /** Minimal synthetic directory projection; it does not convey real subject authority. */
 export type PortalDemoCard = Partial<Pick<SoschainDemoSubject,'cardDid'|'ncbiTaxonomyId'|'providerCode9'|'relationship'>> & Readonly<{
@@ -81,7 +82,7 @@ export class PortalDemoExchange {
     const cards=await this.options.store.query<CardRecord>(names.cards,{where:[{attribute:'subjectIdentifier',equals:subjectIdentifier}]})
     if (!cards.some(card=>card.expiresAt>this.now())) throw new Error('demo_card_not_found')
     const rows=await this.options.store.query<CommunicationRecord>(names.communications,{where:[{attribute:'subjectIdentifier',equals:subjectIdentifier}]})
-    return rows.map(eventFromCommunication).filter(event=>isParticipant(event,participant)).sort((a,b)=>Date.parse(a.occurredAt)-Date.parse(b.occurredAt))
+    return rows.filter(isCallRecord).map(eventFromCommunication).filter(event=>isParticipant(event,participant)).sort((a,b)=>Date.parse(a.occurredAt)-Date.parse(b.occurredAt))
   }
   /** Recipient notifications do not require ownership or selection of the attended card. */
   async listRecipientEvents(scope:DemoWorkspaceScope,participant:PortalDemoParticipant):Promise<PortalRtcCallEvent[]> {
@@ -139,7 +140,9 @@ export class PortalDemoExchange {
   }
 }
 
-export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string}>) {
+export type PortalDemoCareParticipant=PortalDemoParticipant & Readonly<{profileId?:string;profileExpiresAt?:number}>
+export type PortalDemoCareProviderFactory=(input:Readonly<{scope:DemoWorkspaceScope;subjectIdentifier:string;participant:PortalDemoCareParticipant}>)=>Promise<PortalCareVaultProvider>
+export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory}>) {
   const authorized=serviceCredential(options.bearer)
   collections(options.scope)
   return async(request:Request):Promise<Response>=>{
@@ -147,9 +150,16 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
     if (request.method!=='POST') return Response.json({error:'method_not_allowed'},{status:405})
     try {
       const text=await request.text();if(Buffer.byteLength(text)>32_768) return Response.json({error:'demo_exchange_request_too_large'},{status:413})
-      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoParticipant}
+      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation}
       collections(body.scope)
       if(body.scope.key!==options.scope.key) return Response.json({error:'demo_exchange_scope_forbidden'},{status:403})
+      if(body.operation==='care'){
+        if(!options.careProviderFactory)throw new Error('demo_care_provider_unavailable')
+        if(typeof body.subjectIdentifier!=='string'||!body.subjectIdentifier||typeof body.participant?.actorIdentifier!=='string'||!body.participant.actorIdentifier)throw new TypeError('care_request_invalid')
+        const provider=await options.careProviderFactory({scope:body.scope,subjectIdentifier:body.subjectIdentifier,participant:body.participant})
+        const {executePortalCareOperation}=await import('./portal-care-vault.js')
+        return Response.json({result:await executePortalCareOperation(provider,body.care)})
+      }
       const result=body.operation==='resolveCard'?await options.exchange.resolveCard(body.scope,body.cardNumber)
         :body.operation==='listEvents'?await options.exchange.listEvents(body.scope,body.subjectIdentifier,body.participant)
           :body.operation==='submitEvent'?await options.exchange.submitEvent(body.scope,body.event,body.participant)
@@ -157,9 +167,11 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
       return Response.json({result:result??null})
     } catch(error) {
       const message=error instanceof Error?error.message:''
-      const code=/^(?:demo_|portal_rtc_)[a-z0-9_]+$/u.test(message)?message
+      const code=/^(?:demo_|portal_rtc_|care_)[a-z0-9_]+$/u.test(message)?message
         :error instanceof SyntaxError||error instanceof TypeError?'demo_exchange_request_invalid':'demo_exchange_failed'
-      const status=code==='demo_exchange_failed'?502:code==='demo_card_not_found'?404:/forbidden|required|identity_mismatch/u.test(code)?403:/transition_invalid/u.test(code)?409:400
+      const status=code==='demo_exchange_failed'?502:code==='demo_care_provider_unavailable'?503:code==='care_context_expired'?401
+        :code==='demo_card_not_found'||code.startsWith('care_')&&code.endsWith('_not_found')?404
+          :/forbidden|required|identity_mismatch/u.test(code)?403:/transition_invalid|revision_conflict|resource_conflict/u.test(code)?409:400
       return Response.json({error:code},{status})
     }
   }
@@ -175,6 +187,7 @@ export class PortalDemoExchangeClient {
   resolveCard(scope:DemoWorkspaceScope,cardNumber:string):Promise<PortalDemoCard> {return this.call({operation:'resolveCard',scope,cardNumber})}
   listEvents(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoParticipant):Promise<PortalRtcCallEvent[]> {return this.call({operation:'listEvents',scope,subjectIdentifier,participant})}
   async submitEvent(scope:DemoWorkspaceScope,event:PortalRtcCallEvent,participant:PortalDemoParticipant):Promise<void> {await this.call({operation:'submitEvent',scope,event,participant})}
+  care(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoCareParticipant,care:PortalCareOperation):Promise<PortalCareOperationResult>{return this.call({operation:'care',scope,subjectIdentifier,participant,care})}
   private async call<T>(body:object):Promise<T> {
     const response=await (this.options.fetchImpl??fetch)(this.url,{method:'POST',headers:{authorization:`Bearer ${this.options.bearer}`,'content-type':'application/json'},body:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(15_000)})
     const payload=await response.json() as {result:T;error?:string}
@@ -197,3 +210,4 @@ function eventFromCommunication(record:CommunicationRecord):PortalRtcCallEvent {
   const message=record.communication as unknown as {body:{data:Array<{resource:{meta:{claims:Record<string,unknown>}}}>}}
   return normalizePortalRtcCallEvent(JSON.parse(Buffer.from(String(message.body.data[0].resource.meta.claims[CommunicationClaim.ContentAttachmentData]),'base64').toString('utf8')))
 }
+function isCallRecord(record:CommunicationRecord){return typeof record.callId==='string'&&record.callId.length>0}

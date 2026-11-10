@@ -26,6 +26,18 @@ Product-neutral Node adapters for trusted SOSCHAIN runtimes.
 
 ## BFF-owned synthetic Demo exchange
 
+The candidate `sos-sdk-node-ts/portal-care-vault` subpath prepares shared
+Appointment, Encounter and Task persistence behind the same transactional
+vault. It reuses `tasks-core-node-ts` rather than introducing another scheduler.
+The owning BFF must inject current subject/section authorization; the SDK
+callback is not authorization evidence by itself. Peer care operations are
+disabled unless that BFF explicitly configures a provider factory.
+
+This work is not yet connected to CH's care screens or deployed. Explicit
+`dispatchDue()` calls create due Communication notices, not a background worker
+or proof of delivered push notifications. Preserve separate service discovery,
+emergency assistance, Encounter and Communication acceptance gates.
+
 `PortalDemoExchange` receives the existing transactional Confidential Storage
 vault. It stores synthetic card discovery records and call events as
 Communications, enforces expiry/generation, participant and state-transition
