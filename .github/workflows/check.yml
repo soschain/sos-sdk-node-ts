@@ -10,8 +10,27 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: sdk
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: soschain/sos-data-utils-ts
+          ref: 0a407650fe9fea50a15ebbf4c63165a02768655b
+          path: shared-data
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26.13.0
-      - run: npm ci --no-audit --no-fund
+      - name: Build the immutable shared-data candidate
+        working-directory: shared-data
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
+      - name: Install the SDK lockfile and temporary candidate
+        working-directory: sdk
+        run: |
+          npm ci --no-audit --no-fund
+          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/sos-data-utils-ts-0.6.30.tgz"
+          git diff --exit-code -- package.json package-lock.json
       - run: npm run check
+        working-directory: sdk
