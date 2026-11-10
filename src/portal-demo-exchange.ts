@@ -49,7 +49,21 @@ export class PortalDemoExchange {
     else await this.options.store.runTransaction(register)
   }
   async resolveCard(scope:DemoWorkspaceScope,cardNumber:string):Promise<PortalDemoCard> {
-    const card=await this.options.store.get<CardRecord>(collections(scope).cards,hash(cardNumber))
+    const collection=collections(scope).cards
+    const locator=typeof cardNumber==='string'?cardNumber.trim():''
+    if(!locator||locator.length>2048)throw new Error('demo_card_not_found')
+    const numeric=locator.replace(/[\s-]/gu,'')
+    let card:CardRecord|undefined
+    if(/^\d{21}$/u.test(numeric))card=await this.options.store.get<CardRecord>(collection,hash(numeric))
+    else {
+      // Match registered aliases exactly. Never derive a number from an arbitrary
+      // DID host/path, fetch a supplied URL or search another Demo scope.
+      const attribute=locator.startsWith('did:web:')?'cardDid':locator.startsWith('urn:uuid:')?'subjectIdentifier':undefined
+      if(attribute){
+        const matches=(await this.options.store.query<CardRecord>(collection,{where:[{attribute,equals:locator}]})).filter(record=>record.expiresAt>this.now())
+        if(matches.length===1)card=matches[0]
+      }
+    }
     if (!card||card.expiresAt<=this.now()) throw new Error('demo_card_not_found')
     const {id:_id,...view}=card;return view
   }

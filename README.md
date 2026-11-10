@@ -43,6 +43,12 @@ enter browser props. The caller BFF must first verify the account, PIN profile,
 sector/role capability and subject scope; a service credential does not prove
 professional authority. Normal Test Network use cases retain their GW path.
 
+Demo card lookup accepts the unformatted or displayed 21-digit number and an
+exact registered card DID or subject identifier. All forms resolve inside the
+same owning BFF directory and retain its scope and expiry checks. An identifier
+does not grant access to encounters or other subject data. Sharing a Firebase
+project alone does not join independently named collections or vaults.
+
 LiveKit receives separate short-lived participant grants. RTC credentials,
 tokens, signaling and media do not belong in Communication history. Optional
 Terminology, media and assistant services remain independent use-case gates.

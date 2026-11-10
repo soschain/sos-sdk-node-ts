@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Resolve Demo cards from displayed card numbers (spaces or hyphens) and exact
+  registered card DID/subject aliases in the owning BFF's existing directory.
+  Retain scope and expiry checks, reject ambiguous aliases and never fetch
+  user-supplied URLs. Separate Firebase account stores do not require a second
+  Demo card directory. This source fix still requires release and deployment.
+
 - Accept one BFF-verified phone or email contact in the existing portable
   professional resolution APIs, retaining the separate `verifiedEmail` input
   for compatibility. Use the shared Antifraud identity contract rather than
