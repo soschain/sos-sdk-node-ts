@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Persist each professional permission request as one Communication carrying its draft Consent Bundle in the same transaction. Bind retries to the requesting actor, retain one receipt and roll back both records if audit persistence fails.
+
+- Invoke one delivery wake-up for each atomic Task/Encounter operation so Firestore never reads again after the callback starts writing; both resource notices remain persisted.
+
+- Commit linked assistance Tasks with Encounter changes, history, notices and retry receipts in one vault transaction. Preserve rollback and reject collisions or updates against hidden foreign-provider records.
+
+- Add a separate subject/generation-scoped Consent collection on the injected
+  transactional vault. Controller edits use optimistic revisions; reads and
+  access evaluation consume current rules through the canonical consent engine.
+
+- Persist authorized Encounter transitions, paired service transfers and immutable
+  EncounterHistory milestones in one vault transaction with Communication
+  notices and a restart-safe retry receipt. Reject stale revisions and changed
+  replays; retain provider resource boundaries in reads and writes. The peer
+  transport carries the same operation over authenticated BFF HTTP.
+
 ## 0.2.3 - 2026-11-10
 
 - Prepare `PortalCareVaultProvider` for scoped Appointment, Encounter and Task
