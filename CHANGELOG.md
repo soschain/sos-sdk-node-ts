@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.4 - 2026-11-11
+
 - Persist each professional permission request as one Communication carrying its draft Consent Bundle in the same transaction. Bind retries to the requesting actor, retain one receipt and roll back both records if audit persistence fails.
 
 - Invoke one delivery wake-up for each atomic Task/Encounter operation so Firestore never reads again after the callback starts writing; both resource notices remain persisted.
