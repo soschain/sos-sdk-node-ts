@@ -33,7 +33,7 @@ The owning BFF must inject current subject/section authorization; the SDK
 callback is not authorization evidence by itself. Peer care operations are
 disabled unless that BFF explicitly configures a provider factory.
 
-This work is not yet connected to CH's care screens or deployed. Explicit
+The owning portal composes its care screens over these providers. Explicit
 `dispatchDue()` calls create due Communication notices, not a background worker
 or proof of delivered push notifications. Preserve separate service discovery,
 emergency assistance, Encounter and Communication acceptance gates.
@@ -218,3 +218,40 @@ are never cache entries; ICA composes static prefix and digit assets. See
 npm ci
 npm run check
 ```
+
+
+## Persisted Encounter journeys and Consent
+
+`sos-sdk-node-ts/portal-care-vault` exposes `PortalCareVaultProvider.mutateEncounter` and the
+`encounter` peer operation. A trusted BFF resolves the exact subject, service,
+provider, actor and allowed state before constructing `PortalEncounterMutation`.
+The browser sends intent rather than native resources or authority claims.
+
+One transaction commits the Encounter stages, immutable EncounterHistory,
+Communication notices and actor-bound retry receipt. Supply a stable
+`operationId` for retries and the current `expectedRevision` for a mutation.
+A return to an existing held Encounter also supplies its destination revision.
+An optional `relatedTask` carries the exact linked assistance Task and its
+revision, so triage and clinical state change together or roll back together.
+Task writes require their own authorization. The optional delivery hook runs
+once per atomic operation, even when both Task and Encounter notices are saved. Hidden provider records cannot be
+replaced by reusing their references. Direct generic history writes are denied.
+
+`sos-sdk-node-ts/portal-consent-vault` exposes `PortalConsentVaultProvider` over the same
+injected transactional vault repository, using a separate collection scoped by
+workspace, subject and generation. Store flat Consent claims. Native FHIR
+objects belong at explicit projection/import boundaries. `replace` requires
+controller write authority and the last snapshot revision; `requestDraft`
+requires request authority and never activates a rule. The authenticated peer
+handler also persists one Communication carrying the draft Consent Bundle in
+the same transaction; a failed audit write rolls back the request. Its saved
+receipt binds retries to the requesting actor. Identical draft retries
+retain the first stored date and identifier.
+
+Use `evaluate` or `evaluateInTransaction` with the verified recipient, role,
+purpose and target. The BFF owns both authorization callbacks and current
+membership checks. Membership and emergency-contact status alone do not grant
+Encounter access. A reset, expiry or revoked grant must fail on the next read.
+The peer endpoint returns effective access only, without exposing unrelated
+rules or recipients. Host-provided storage adapters and each network stage
+require their own execution evidence.

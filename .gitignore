@@ -1,5 +1,6 @@
 node_modules/
 dist/
 .test-results/
+test-results/
 *.tgz
 .DS_Store

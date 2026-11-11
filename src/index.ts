@@ -20,3 +20,5 @@ export * from './employee-activation-grant.js';
 export * from './portal-push-delivery.js';
 export * from './portal-web-push.js';
 export * from './bff-service-bearer.js';
+
+export * from './portal-consent-vault.js'

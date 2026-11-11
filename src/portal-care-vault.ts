@@ -5,12 +5,19 @@ import {CommunicationClaim} from 'gdc-common-utils-ts/models/interoperable-claim
 import {CommunicationCategoryCodes} from 'gdc-common-utils-ts/constants/communication'
 import {createCommMsgExtendedDraft} from 'gdc-sdk-node-ts'
 import {buildSubjectCommunicationGroupReference} from 'sos-data-utils-ts/subject-communication-group'
-import {AppointmentClaim,EncounterClaim} from 'fhir-data-utils-ts/claims'
+import {AppointmentClaim,EncounterClaim,EncounterHistoryClaim,EncounterStatusR5} from 'fhir-data-utils-ts/claims'
+import {planPortalEncounterChange,type PortalEncounterSourceOutcome} from 'sos-data-utils-ts/portal-encounter-journey'
 import {buildFlatClaimResourceEntry,type FlatClaimResourceEntry} from 'fhir-data-utils-ts/flat-claim-resource-graph'
 import {TaskClaim} from 'sos-data-utils-ts/task-artifact-schema'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 
-export type PortalCareResourceType='Appointment'|'Encounter'|'Task'
+export type PortalCareResourceType='Appointment'|'Encounter'|'EncounterHistory'|'Task'
+/** Trusted adapter input. Public portals send intent; their BFF resolves flat entries and authority. */
+export type PortalEncounterMutation=Readonly<{
+  operationId:string;encounterReference:string;expectedRevision?:number;create?:FlatClaimResourceEntry
+  relatedTask?:Readonly<{entry:FlatClaimResourceEntry;expectedRevision?:number}>
+  status?:EncounterStatusR5;destination?:FlatClaimResourceEntry;sourceOutcome?:PortalEncounterSourceOutcome;destinationExpectedRevision?:number
+}>
 export type PortalCareStoredResource=Readonly<{
   id:string;scopeKey:string;subjectIdentifier:string;generationId:string;expiresAt:number
   entry:FlatClaimResourceEntry;revision:number;remindAt:string|null
@@ -24,6 +31,7 @@ export type PortalCareSaveOptions=Readonly<{expectedRevision?:number;remindAt?:s
 export type PortalCareOperation=
   | Readonly<{kind:'search';resourceType:PortalCareResourceType}>
   | Readonly<{kind:'save';entry:FlatClaimResourceEntry;mode:'create'|'update';options?:PortalCareSaveOptions}>
+  | Readonly<{kind:'encounter';mutation:PortalEncounterMutation}>
   | Readonly<{kind:'notifications'}>
   | Readonly<{kind:'acknowledge';id:string}>
   | Readonly<{kind:'tick'}>
@@ -37,6 +45,8 @@ export type PortalCareVaultOptions=Readonly<{
   actorIdentifier:string;recipientActorIdentifier:string;expiresAt:number;communicationsCollection:string
   /** The BFF derives authority from its verified session, selected subject and professional capabilities. */
   assertAccess:(transaction:IVaultRepository,action:'read'|'write',resourceType?:PortalCareResourceType)=>Promise<void>
+  /** Optional provider/section boundary within an already authorized subject. */
+  assertResourceAccess?:(transaction:IVaultRepository,action:'read'|'write',entry:FlatClaimResourceEntry)=>Promise<void>
   now?:()=>number
   /** Called before care writes, inside their transaction; the owning delivery port may enqueue one wake-up. */
   enqueueNotice?:(transaction:IVaultRepository,notice:PortalCareNotification)=>Promise<void>
@@ -88,11 +98,14 @@ export class PortalCareVaultProvider {
 
   async save(raw:FlatClaimResourceEntry,mode:'create'|'update',options:PortalCareSaveOptions={}):Promise<PortalCareStoredResource>{
     const entry=this.normalize(raw)
+    if(entry.resourceType==='EncounterHistory')throw new TypeError('care_history_write_requires_encounter_transaction')
     if(mode!=='create'&&mode!=='update')throw new TypeError('care_mutation_invalid')
     const remindAt=this.reminderDate(entry,options)
     return this.options.store.runTransaction(async transaction=>{
       await this.authorize(transaction,'write',entry.resourceType as PortalCareResourceType)
+      await this.options.assertResourceAccess?.(transaction,'write',entry)
       const id=this.resourceId(entry),previous=await transaction.get<PortalCareStoredResource>(this.collectionNames.resources,id)
+      if(previous&&this.owns(previous))await this.options.assertResourceAccess?.(transaction,'write',previous.entry)
       if(previous&&this.owns(previous)&&equal(previous.entry,entry)&&previous.remindAt===remindAt)return previous
       if(mode==='create'&&previous)throw new Error('care_resource_conflict')
       if(mode==='update'&&(!previous||!this.owns(previous)))throw new Error('care_resource_not_found')
@@ -109,13 +122,96 @@ export class PortalCareVaultProvider {
     })
   }
 
+  /** One transaction owns the stages, immutable milestones, notification and retry receipt. */
+  async mutateEncounter(mutation:PortalEncounterMutation):Promise<readonly PortalCareStoredResource[]>{
+    const keys=['operationId','encounterReference','expectedRevision','create','status','destination','sourceOutcome','destinationExpectedRevision','relatedTask']
+    if(!mutation||Object.keys(mutation).some(key=>!keys.includes(key))
+      ||typeof mutation.operationId!=='string'||typeof mutation.encounterReference!=='string'
+      ||!/^[A-Za-z0-9._-]{1,96}$/u.test(mutation.operationId||'')
+      ||!/^Encounter\/[A-Za-z0-9._-]{1,128}$/u.test(mutation.encounterReference||''))throw new TypeError('encounter_mutation_invalid')
+    const fingerprint=hash(JSON.stringify({actor:this.options.actorIdentifier,mutation}))
+    const receipts=`${this.collectionNames.resources}_operations`
+    const id=hash([this.options.scopeKey,this.options.generationId,this.options.subjectIdentifier,mutation.operationId].join('\0'))
+    await this.options.store.runTransaction(async transaction=>{
+      await this.authorize(transaction,'write','Encounter')
+      const receipt=await transaction.get<{id:string;fingerprint:string}>(receipts,id)
+      if(receipt){if(receipt.fingerprint!==fingerprint)throw new Error('encounter_idempotency_conflict');return}
+      const rows=await this.resources(transaction)
+      const previous=rows.find(row=>row.entry.reference===mutation.encounterReference)
+      let entries:readonly FlatClaimResourceEntry[]
+      const at=new Date(this.now()).toISOString()
+      if(mutation.create){
+        const created=this.normalize(mutation.create)
+        if(created.resourceType!=='Encounter'||created.reference!==mutation.encounterReference
+          ||created.claims[EncounterClaim.Status]!==EncounterStatusR5.Planned
+          ||mutation.expectedRevision!==undefined||mutation.destination||mutation.status||mutation.sourceOutcome)throw new TypeError('encounter_mutation_invalid')
+        if(previous||await transaction.get(this.collectionNames.resources,this.resourceId(created)))throw new Error('care_resource_conflict')
+        entries=[created]
+      }else{
+        if(!previous)throw new Error('care_resource_not_found')
+        if(!Number.isInteger(mutation.expectedRevision)||mutation.expectedRevision!==previous.revision)throw new Error('care_revision_conflict')
+        let destination:FlatClaimResourceEntry|undefined
+        if(mutation.destination){
+          destination=this.normalize(mutation.destination)
+          const existing=rows.find(row=>row.entry.reference===destination!.reference)
+          if(existing){
+            if(existing.revision!==mutation.destinationExpectedRevision)throw new Error('care_revision_conflict')
+            destination=existing.entry
+          }else{
+            if(await transaction.get(this.collectionNames.resources,this.resourceId(destination)))throw new Error('care_resource_conflict')
+            if(destination.claims[EncounterClaim.Status]!==EncounterStatusR5.Planned)throw new TypeError('encounter_destination_invalid')
+          }
+        }
+        entries=planPortalEncounterChange({subjectIdentifier:this.options.subjectIdentifier,source:previous.entry,occurredAt:at,
+          historyId:`${mutation.operationId}-source`,status:mutation.status,destination,sourceOutcome:mutation.sourceOutcome,
+          destinationHistoryId:`${mutation.operationId}-destination`,
+        })
+      }
+      if(mutation.relatedTask){
+        const companion=mutation.relatedTask
+        if(typeof companion!=='object'||Object.keys(companion).some(key=>!['entry','expectedRevision'].includes(key)))throw new TypeError('encounter_task_invalid')
+        await this.authorize(transaction,'write','Task')
+        const task=this.normalize(companion.entry)
+        const source=entries.find(entry=>entry.reference===mutation.encounterReference)!
+        if(task.resourceType!=='Task'||task.claims[TaskClaim.BasedOn]!==mutation.encounterReference||task.claims[TaskClaim.Focus]!==source.claims[EncounterClaim.ServiceType])throw new TypeError('encounter_task_invalid')
+        const previousTask=rows.find(row=>row.entry.reference===task.reference)
+        if(companion.expectedRevision===undefined){if(previousTask||await transaction.get(this.collectionNames.resources,this.resourceId(task)))throw new Error('care_resource_conflict')}
+        else if(!Number.isInteger(companion.expectedRevision)||companion.expectedRevision<1||previousTask?.revision!==companion.expectedRevision)throw new Error('care_revision_conflict')
+        entries=[...entries,task]
+      }
+      for(const entry of entries)await this.options.assertResourceAccess?.(transaction,'write',entry)
+      const jobs=await this.taskRepository(transaction),engine=this.taskService(jobs)
+      const records:PortalCareStoredResource[]=[]
+      for(const raw of entries){
+        const entry=this.normalize(raw),old=rows.find(row=>row.entry.reference===entry.reference)
+        if(entry.resourceType==='EncounterHistory'&&(old||await transaction.get(this.collectionNames.resources,this.resourceId(entry))))throw new Error('encounter_history_immutable')
+        const record=this.record(entry,(old?.revision??0)+1,this.reminderDate(entry,{remindAt:old?.remindAt??null}))
+        if(entry.resourceType==='Encounter'||entry.resourceType==='Task')await this.replaceReminder(engine,jobs,record)
+        records.push(record)
+      }
+      const changed=records.find(record=>record.entry.reference===mutation.encounterReference)!
+      const notice=this.notice(changed,hash(`encounter-notice\0${id}`),'Encounter journey updated')
+      const taskRecord=records.find(record=>record.entry.resourceType==='Task')
+      const taskNotice=taskRecord?this.notice(taskRecord,hash(`encounter-task-notice\0${id}`),'Assistance task updated'):undefined
+      await this.options.enqueueNotice?.(transaction,notice)
+      for(const record of records)await transaction.put(this.collectionNames.resources,record)
+      await transaction.put(this.collectionNames.communications,notice)
+      if(taskNotice)await transaction.put(this.collectionNames.communications,taskNotice)
+      await jobs.flush()
+      await transaction.put(receipts,{id,fingerprint,scopeKey:this.options.scopeKey,generationId:this.options.generationId,
+        subjectIdentifier:this.options.subjectIdentifier,expiresAt:this.options.expiresAt})
+    })
+    return [...await this.search('Encounter'),...await this.search('EncounterHistory')]
+  }
+
   async notifications():Promise<readonly PortalCareNotification[]>{
     return this.options.store.runTransaction(async transaction=>{
       await this.authorize(transaction,'read')
       const rows=await transaction.query<PortalCareNotification>(this.collectionNames.communications,{where:[{attribute:'subjectIdentifier',equals:this.options.subjectIdentifier},{attribute:'kind',equals:'care'}]})
+      const references=new Set((await this.resources(transaction)).map(row=>row.entry.reference))
       const visible:PortalCareNotification[]=[]
       for(const row of rows){
-        if(this.owns(row)&&await this.canRead(transaction,resourceTypeOf(row.resourceReference)))visible.push(row)
+        if(this.owns(row)&&references.has(row.resourceReference)&&await this.canRead(transaction,resourceTypeOf(row.resourceReference)))visible.push(row)
       }
       return visible.sort((a,b)=>a.occurredAt.localeCompare(b.occurredAt))
     })
@@ -177,7 +273,13 @@ export class PortalCareVaultProvider {
   }
   private async resources(transaction:IVaultRepository){
     const rows=await transaction.query<PortalCareStoredResource>(this.collectionNames.resources,{where:[{attribute:'subjectIdentifier',equals:this.options.subjectIdentifier}]})
-    return rows.filter(row=>this.owns(row))
+    const visible:PortalCareStoredResource[]=[]
+    for(const row of rows){
+      if(!this.owns(row))continue
+      try{await this.options.assertResourceAccess?.(transaction,'read',row.entry);visible.push(row)}
+      catch(error){if(!(error&&typeof error==='object'&&'status' in error&&error.status===403))throw error}
+    }
+    return visible
   }
   private resourceId(entry:FlatClaimResourceEntry){return hash([this.options.scopeKey,this.options.generationId,this.options.subjectIdentifier,entry.reference].join('\0'))}
   private record(entry:FlatClaimResourceEntry,revision:number,remindAt:string|null):PortalCareStoredResource{
@@ -194,11 +296,12 @@ export class PortalCareVaultProvider {
     const claims=normalized.claims
     const subject=entry.resourceType==='Task'?(claims[TaskClaim.For]||claims[TaskClaim.Subject])
       :entry.resourceType==='Encounter'?(claims[EncounterClaim.Subject]||claims[EncounterClaim.Patient])
+        :entry.resourceType==='EncounterHistory'?claims[EncounterHistoryClaim.Subject]
         :claims[AppointmentClaim.Patient]||claims['Appointment.subject']
     const subjectMatch=subject?referenceIdentity(subject)===referenceIdentity(this.options.subjectIdentifier)
       :entry.resourceType==='Appointment'&&String(claims[AppointmentClaim.ParticipantActor]||'').split(',').some(value=>referenceIdentity(value)===referenceIdentity(this.options.subjectIdentifier))
     if(!subjectMatch)throw new TypeError('care_resource_subject_mismatch')
-    for(const key of [AppointmentClaim.Start,AppointmentClaim.End,AppointmentClaim.Date,EncounterClaim.PeriodStart,EncounterClaim.PeriodEnd,EncounterClaim.ActualPeriodStart,EncounterClaim.ActualPeriodEnd,TaskClaim.ScheduledAt,TaskClaim.AutoCloseAt,TaskClaim.WindowStart,TaskClaim.WindowEnd]){
+    for(const key of [AppointmentClaim.Start,AppointmentClaim.End,AppointmentClaim.Date,EncounterClaim.PeriodStart,EncounterClaim.PeriodEnd,EncounterClaim.ActualPeriodStart,EncounterClaim.ActualPeriodEnd,EncounterHistoryClaim.ActualPeriodStart,EncounterHistoryClaim.ActualPeriodEnd,TaskClaim.ScheduledAt,TaskClaim.AutoCloseAt,TaskClaim.WindowStart,TaskClaim.WindowEnd]){
       if(key in claims&&!Number.isFinite(Date.parse(claims[key])))throw new TypeError('care_resource_date_invalid')
     }
     return normalized
@@ -243,9 +346,10 @@ export class PortalCareVaultProvider {
 /** Shared operation boundary; callers supply the already authorized provider, never browser authority flags. */
 export async function executePortalCareOperation(provider:PortalCareVaultProvider,input:PortalCareOperation):Promise<PortalCareOperationResult>{
   if(!input||typeof input!=='object'||Array.isArray(input))throw new TypeError('care_operation_invalid')
-  const allowed:Record<string,readonly string[]>={search:['kind','resourceType'],save:['kind','entry','mode','options'],notifications:['kind'],acknowledge:['kind','id'],tick:['kind']}
+  const allowed:Record<string,readonly string[]>={search:['kind','resourceType'],save:['kind','entry','mode','options'],encounter:['kind','mutation'],notifications:['kind'],acknowledge:['kind','id'],tick:['kind']}
   if(!allowed[input.kind]||Object.keys(input).some(key=>!allowed[input.kind].includes(key)))throw new TypeError('care_operation_invalid')
   if(input.kind==='search')return {kind:'resources',resources:await provider.search(input.resourceType)}
+  if(input.kind==='encounter')return {kind:'resources',resources:await provider.mutateEncounter(input.mutation)}
   if(input.kind==='save'){
     if(input.options&&(Object.keys(input.options).some(key=>!['expectedRevision','remindAt'].includes(key))
       ||(input.options.expectedRevision!==undefined&&(!Number.isInteger(input.options.expectedRevision)||input.options.expectedRevision<1))))throw new TypeError('care_mutation_invalid')
@@ -272,6 +376,6 @@ class BufferedVaultTaskRepository implements TaskRepository {
 function hash(value:string){return createHash('sha256').update(value).digest('hex')}
 function referenceIdentity(value:string){return value.trim().replace(/^(?:Patient|Organization)\//u,'')}
 function resourceTypeOf(reference:string){const type=reference.split('/')[0];assertResourceType(type);return type}
-function assertResourceType(value:unknown):asserts value is PortalCareResourceType{if(!['Appointment','Encounter','Task'].includes(String(value)))throw new TypeError('care_resource_type_invalid')}
+function assertResourceType(value:unknown):asserts value is PortalCareResourceType{if(!['Appointment','Encounter','EncounterHistory','Task'].includes(String(value)))throw new TypeError('care_resource_type_invalid')}
 function terminal(entry:FlatClaimResourceEntry){return ['cancelled','completed','fulfilled','finished','entered-in-error'].includes(entry.claims[`${entry.resourceType}.status`]||'')}
 function equal(a:FlatClaimResourceEntry,b:FlatClaimResourceEntry){return a.reference===b.reference&&JSON.stringify(Object.entries(a.claims).sort())===JSON.stringify(Object.entries(b.claims).sort())}
