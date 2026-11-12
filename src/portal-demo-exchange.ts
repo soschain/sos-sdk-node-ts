@@ -1,3 +1,4 @@
+import {SOSCHAIN_DEMO_ORGANIZATIONS,SOSCHAIN_PROFESSIONAL_DEMO_PROFILES} from 'sos-data-utils-ts/portal-access-profiles'
 import {normalizeConsentTarget} from 'gdc-common-utils-ts/utils/consent'
 import type {PortalConsentVaultProvider} from './portal-consent-vault.js'
 import type {ConsentActorDescriptor,EffectiveAccessEvaluation} from 'gdc-common-utils-ts/models/consent-access'
@@ -22,10 +23,11 @@ export type PortalDemoCard = Partial<Pick<SoschainDemoSubject,'cardDid'|'ncbiTax
   controllerActorIdentifier:string; subjectKind:'person'|'animal'; sourceSector:string; expiresAt:number
   emergencyContacts?:readonly SoschainDemoContact<string>[]
 }>
-export type PortalDemoParticipant = Readonly<{actorIdentifier:string; professionalGroupReference?:string;deviceKeyId?:string}>
+export type PortalDemoParticipant = Readonly<{actorIdentifier:string; professionalGroupReference?:string;deviceKeyId?:string;profileId?:string;organizationReference?:string}>
 type CardRecord = PortalDemoCard & {id:string}
 type CommunicationRecord = {id:string;callId:string;subjectIdentifier:string;recipientActorHash?:string;occurredAt:string;communication:ReturnType<typeof createCommMsgExtendedDraft>['message']}
-type PermissionRequestRecord = {id:string;subjectIdentifier:string;generationId:string;senderIdentifier:string;occurredAt:string;communication:ReturnType<typeof createCommMsgExtendedDraft>['message']}
+export type PortalPermissionRequestContext = Readonly<{consentIdentifier:string;organizationLabel:string;organizationDid:string;roleLabel:string;requestedAt:string}>
+type PermissionRequestRecord = {requester?:PortalPermissionRequestContext;id:string;subjectIdentifier:string;generationId:string;senderIdentifier:string;occurredAt:string;communication:ReturnType<typeof createCommMsgExtendedDraft>['message']}
 
 /** One BFF owns the injected vault; peer BFFs use its authenticated service port. No GW, Chat or second store is involved. */
 export class PortalDemoExchange {
@@ -48,10 +50,24 @@ export class PortalDemoExchange {
     }
     if(previous)throw new Error('consent_request_conflict')
     const occurredAt=new Date(this.now()).toISOString()
+    const organization=SOSCHAIN_DEMO_ORGANIZATIONS.find(item=>item.organizationUrn.replace('urn:uuid:','Organization/')===participant.organizationReference)
+    const profile=SOSCHAIN_PROFESSIONAL_DEMO_PROFILES.find(item=>item.enabled&&item.id===participant.profileId&&item.sector===organization?.sector)
+    if((participant.organizationReference||participant.profileId)&&(!organization||!profile))throw new Error('consent_request_context_forbidden')
+    const requester=organization&&profile?{consentIdentifier:String(claims[ClaimConsent.identifier]),organizationLabel:organization.titleEn,organizationDid:organization.organizationDid,roleLabel:profile.titleEn,requestedAt:occurredAt}:undefined
     const bundle={resourceType:'Bundle',type:'collection',data:[{resource:{resourceType:'Consent',meta:{claims}}}]}
     const draft=createCommMsgExtendedDraft({messageId:id,thid:`${id}-request`,subject:subjectIdentifier,sender:participant.actorIdentifier,sent:occurredAt,status:'completed',category:CommunicationCategoryCodes.Notification.claim,
       claims:{[CommunicationClaim.Identifier]:id,[CommunicationClaim.Recipient]:card.controllerActorIdentifier,[CommunicationClaim.ContentAttachmentType]:HttpMediaTypes.FhirJson,[CommunicationClaim.ContentAttachmentTitle]:'permission-request.json',[CommunicationClaim.ContentAttachmentData]:Buffer.from(JSON.stringify(bundle)).toString('base64')}})
-    await transaction.put(names.communications,{id,subjectIdentifier,generationId:card.generationId,senderIdentifier:participant.actorIdentifier,occurredAt,communication:draft.message})
+    await transaction.put(names.communications,{id,subjectIdentifier,generationId:card.generationId,senderIdentifier:participant.actorIdentifier,occurredAt,...(requester?{requester}:{}),communication:draft.message})
+  }
+  /** Controller-only audit projection. Requester identity never changes the requested audience or grants access. */
+  async listPermissionRequests(scope:DemoWorkspaceScope,subjectIdentifier:string,controllerActorIdentifier:string):Promise<readonly PortalPermissionRequestContext[]>{
+    return this.options.store.runTransaction(async transaction=>{
+      const names=collections(scope)
+      const cards=(await transaction.query<CardRecord>(names.cards,{where:[{attribute:'subjectIdentifier',equals:subjectIdentifier}]})).filter(card=>card.expiresAt>this.now())
+      if(cards.length!==1||cards[0]!.controllerActorIdentifier!==controllerActorIdentifier)throw new Error('consent_requests_controller_forbidden')
+      const rows=await transaction.query<PermissionRequestRecord>(names.communications,{where:[{attribute:'subjectIdentifier',equals:subjectIdentifier}]})
+      return rows.filter(row=>row.generationId===cards[0]!.generationId&&row.requester).map(row=>row.requester!)
+    })
   }
   /** A trusted BFF may supply its current transaction to commit workspace and directory together. */
   async registerCard(scope:DemoWorkspaceScope,card:PortalDemoCard,transaction?:IVaultRepository):Promise<void> {
