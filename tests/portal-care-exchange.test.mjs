@@ -18,6 +18,7 @@ import {EncounterClaim as E,EncounterStatusR5 as S} from 'fhir-data-utils-ts/cla
 import {buildFlatClaimResourceEntry} from 'fhir-data-utils-ts/flat-claim-resource-graph'
 import {FHIR_ENCOUNTER_TRANSFER_TEST_DATA as encounterFixture} from 'fhir-data-utils-ts/data'
 import {TaskClaim} from 'sos-data-utils-ts/task-artifact-schema'
+import {SOSCHAIN_DEMO_ORGANIZATIONS,SOSCHAIN_PROFESSIONAL_DEMO_PROFILES} from 'sos-data-utils-ts/portal-access-profiles'
 import {SOSCHAIN_PERSONAL_DEMO_HOUSEHOLD} from 'sos-data-utils-ts/portal-demo-fixtures'
 import {buildSubjectCommunicationGroupReference} from 'sos-data-utils-ts/subject-communication-group'
 import {CommunicationClaim} from 'gdc-common-utils-ts/models/interoperable-claims/communication-claims'
@@ -169,4 +170,16 @@ test('the authenticated peer can request a draft and inspect its exact effective
  assert.equal(effective.evaluation.allowed,true)
  assert.equal(JSON.stringify(effective).includes(examples.individualEmail),false)
  await assert.rejects(f.client.consent(f.scope,examples.didWeb+':other',f.participant,inspect))
+})
+
+test('permission audit exposes the verified requesting organization to the controller, including country requests',async t=>{
+ const f=await fixture(t),profile=SOSCHAIN_PROFESSIONAL_DEMO_PROFILES.find(item=>item.id==='doctor'),organization=SOSCHAIN_DEMO_ORGANIZATIONS.find(item=>item.sector===profile.sector)
+ const claims={...buildConsentClaimsSimple({subjectDid:examples.didWeb,actor:examples.countryIso2,actorRole:profile.roleClaim,purpose:HealthcareConsentPurposes.Treatment,actions:[IndividualLogicalSections.Encounters.attributeValue],consentIdentifier:examples.resourceUuid}).consentClaims,[C.status]:'draft'}
+ const participant={...f.participant,profileId:profile.id,organizationReference:organization.organizationUrn.replace('urn:uuid:','Organization/')}
+ await f.store.runTransaction(transaction=>f.exchange.recordPermissionRequest(f.scope,examples.didWeb,participant,claims,transaction,false))
+ assert.equal(typeof f.exchange.listPermissionRequests,'function')
+ const requests=await f.exchange.listPermissionRequests(f.scope,examples.didWeb,examples.didWeb)
+ assert.equal(requests.length,1);assert.equal(requests[0].consentIdentifier,examples.resourceUuid)
+ assert.equal(requests[0].organizationLabel,organization.titleEn);assert.equal(requests[0].organizationDid,organization.organizationDid)
+ await assert.rejects(f.exchange.listPermissionRequests(f.scope,examples.didWeb,examples.didWeb+':other'),/forbidden/)
 })

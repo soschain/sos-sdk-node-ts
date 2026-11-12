@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Evaluate the shared professional treatment/emergency hierarchy in the Consent vault. Persist and expose controller-only requesting-organization audit context separately from the requested audience; draft requests remain non-authorizing and atomic with their Communication.
+
 ## 0.2.4 - 2026-11-11
 
 - Persist each professional permission request as one Communication carrying its draft Consent Bundle in the same transaction. Bind retries to the requesting actor, retain one receipt and roll back both records if audit persistence fails.
