@@ -41,7 +41,7 @@ test('keeps encrypted verification and Offer-to-Order continuation inside the No
 test('exports the neutral runtime without product SDK dependencies', () => {
   const packageJson = JSON.parse(readFileSync('package.json', 'utf8'))
   assert.equal(packageJson.dependencies['gdc-sdk-node-ts'], '2.9.32')
-  assert.equal(packageJson.dependencies['gdc-common-utils-ts'], '2.9.30')
+  assert.equal(packageJson.dependencies['gdc-common-utils-ts'], '2.9.31')
   assert.equal(packageJson.dependencies['uhc-sdk-node-ts'], undefined)
   assert.equal(packageJson.dependencies['vet-sdk-node-ts'], undefined)
 })
