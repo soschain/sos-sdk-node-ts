@@ -57,6 +57,11 @@ export type PortalCareVaultOptions=Readonly<{
  * process-local authority, telephone channel or replacement task engine. TaskService is
  * the same task lifecycle implementation used by Chat/GW; its repository is adapted here.
  */
+export function portalCareResourcesCollection(scopeKey:string):string{
+  if(typeof scopeKey!=='string'||!scopeKey.trim())throw new TypeError('care_context_invalid')
+  return `portal_care_${hash(scopeKey)}_resources`
+}
+
 export class PortalCareVaultProvider {
   readonly collectionNames:Readonly<{resources:string;tasks:string;communications:string}>
   private readonly options:PortalCareVaultOptions
@@ -67,7 +72,7 @@ export class PortalCareVaultProvider {
     if(!Number.isFinite(options.expiresAt)||typeof options.assertAccess!=='function')throw new TypeError('care_context_invalid')
     this.options=options;this.now=options.now??Date.now
     const prefix=`portal_care_${hash(options.scopeKey)}`
-    this.collectionNames=Object.freeze({resources:`${prefix}_resources`,tasks:`${prefix}_tasks`,communications:options.communicationsCollection})
+    this.collectionNames=Object.freeze({resources:portalCareResourcesCollection(options.scopeKey),tasks:`${prefix}_tasks`,communications:options.communicationsCollection})
   }
 
   async search(resourceType:PortalCareResourceType):Promise<readonly PortalCareStoredResource[]>{

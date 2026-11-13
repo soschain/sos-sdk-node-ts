@@ -22,3 +22,5 @@ export * from './portal-web-push.js';
 export * from './bff-service-bearer.js';
 
 export * from './portal-consent-vault.js'
+export * from './organization-workforce-vault.js'
+export * from './organization-catalog-vault.js'

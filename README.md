@@ -255,3 +255,35 @@ Encounter access. A reset, expiry or revoked grant must fail on the next read.
 The peer endpoint returns effective access only, without exposing unrelated
 rules or recipients. Host-provided storage adapters and each network stage
 require their own execution evidence.
+
+`careInboxSubjects(scope, participant)` uses the same authenticated peer
+endpoint. Its injected `careInboxProvider` must verify the protected recipient
+profile and published service Group before discovering any subject. The SDK
+does not infer clinical permission from inbox membership. Hosts use
+`portalCareResourcesCollection(scopeKey)` from `portal-care-vault` when querying
+that existing vault collection, then verify current card generations and TTL.
+
+`OrganizationWorkforceVaultProvider` and `OrganizationCatalogVaultProvider`
+are server-side providers over an injected `TransactionalVaultRepository`.
+The host supplies the fully scoped collection and verifies the protected
+principal; the SDK never selects a tenant from browser input. Workforce
+supports invitation delivery state, single-use activation with an atomic
+profile callback, licence lifecycle and group membership. Catalog saves
+merge canonical resources under one organization with a revision check.
+Email delivery stays behind an injected provider and is never performed
+inside a vault transaction.
+
+Demo BFFs can use these providers with memory or the configured durable vault.
+The network composition retains its authorized SDK/GW provider for the same
+commands. This adds no separate Demo database or professional authority.
+`PortalDemoExchangeClient.catalog` uses the existing peer credential and fixed
+scope; its owner-supplied catalog provider must validate controller writes and
+organization-bound reads before invoking the vault provider. Permission
+request audit labels can likewise come from the owner-validated profile;
+labels do not grant or broaden Consent.
+
+Hosts re-read active licence and group assignments before invoking care
+providers. Scheduling write capability is separate from encounter write
+capability; receiving an appointment assignment never grants clinical
+authorship. The SDK preserves those host-supplied capabilities over the
+authenticated peer boundary.
