@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Allow an authorized Consent replacement to commit related changes through the same supplied vault transaction. Authorization and revision checks precede the callback; failure rolls back both the Consent and related writes. The callback performs vault operations only, never external delivery.
+
 ## 0.2.5 - 2026-11-12
 
 - Evaluate the shared professional treatment/emergency hierarchy in the Consent vault. Persist and expose controller-only requesting-organization audit context separately from the requested audience; draft requests remain non-authorizing and atomic with their Communication.

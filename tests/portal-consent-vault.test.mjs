@@ -1,3 +1,4 @@
+// Flow contract: reuse shared test fixtures and canonical types; do not introduce duplicated literals.
 // Flow contract: one subject/generation-scoped Consent collection in the injected transactional vault serves both portals; only controllers edit, every read uses current active rules, and stale, foreign, revoked or failed changes never broaden access.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -52,4 +53,19 @@ test('a professional can append only a draft request and cannot approve it',asyn
  assert.equal((await f.provider.read()).claims.length,1)
  assert.equal((await professional.evaluate({actor:{email:examples.firstContactEmail},actorRole:HealthcareActorRoles.MedicalDoctors,purpose:HealthcareConsentPurposes.Treatment,sections:[section]})).allowed,false)
  await assert.rejects(professional.replace([rule()],1),/controller_required/)
+})
+
+test('controller replacement commits related vault writes atomically and rolls back a failed callback',async()=>{
+ const f=fixture(),collection='contract-side-effect' // Literal is a deliberately neutral test collection, not an operational resource.
+ await assert.rejects(f.provider.replace([rule()],0,async transaction=>{await transaction.put(collection,{id:examples.resourceUuid});throw new Error('injected-after-related-write')}),/injected/)
+ assert.deepEqual(await f.provider.read(),{revision:0,claims:[]})
+ assert.equal(await f.store.get(collection,examples.resourceUuid),undefined)
+ const commit=async transaction=>{await transaction.put(collection,{id:examples.resourceUuid})}
+ await f.provider.replace([rule()],0,commit)
+ assert.equal((await f.provider.read()).claims.length,1)
+ assert.equal((await f.store.get(collection,examples.resourceUuid)).id,examples.resourceUuid)
+ let invoked=false
+ f.revokeWrite()
+ await assert.rejects(f.provider.replace([],1,async()=>{invoked=true}),/forbidden/)
+ assert.equal(invoked,false)
 })
