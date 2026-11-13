@@ -52,3 +52,22 @@ test('does not expose mutable references outside an atomic transaction', async (
   readback.nested.counter = 3
   assert.equal((await vault.get('records', 'one')).nested.counter, 1)
 })
+
+test('filters, orders and paginates isolated records and deletes exact identifiers', async () => {
+  const vault = new TransactionalMemoryVaultRepository()
+  await vault.put('records', [
+    {id:'a',status:'ready',rank:3},
+    {id:'b',status:'ready',rank:1},
+    {id:'c',status:'closed',rank:2},
+  ])
+  const result = await vault.query('records', {
+    where:[{attribute:'status',in:['ready']}],
+    orderBy:{attribute:'rank',direction:'asc'},offset:1,limit:1,
+  })
+  assert.deepEqual(result.map(record=>record.id),['a'])
+  result[0].rank=99
+  assert.equal((await vault.get('records','a')).rank,3)
+  assert.equal(await vault.delete('records','a'),true)
+  assert.equal(await vault.delete('records','a'),false)
+  assert.deepEqual(await vault.query('missing',{}),[])
+})

@@ -5,10 +5,11 @@ import assert from 'node:assert/strict'
 import {PortalConsentVaultProvider} from '../dist/portal-consent-vault.js'
 import {TransactionalMemoryVaultRepository} from '../dist/transactional-vault.js'
 import {REPOSITORY_SAFE_EXAMPLES as examples} from 'sos-data-utils-ts/repository-privacy'
-import {ClaimConsent as C} from 'gdc-common-utils-ts/models/consent-rule'
-import {buildConsentClaimsSimple} from 'gdc-common-utils-ts/utils/consent'
-import {HealthcareActorRoles,HealthcareConsentPurposes} from 'gdc-common-utils-ts/constants/healthcare'
-import {IndividualLogicalSections} from 'gdc-common-utils-ts/constants/individual-sections'
+import {ClaimConsent as C} from 'fhir-data-utils-ts'
+import {buildConsentClaimsSimple} from 'sos-data-utils-ts/consent-coverage'
+import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
+import {HealthcareConsentPurposes} from 'fhir-data-utils-ts'
+import {IndividualLogicalSections} from 'sos-data-utils-ts/individual-sections'
 const section=IndividualLogicalSections.Encounters.attributeValue
 const rule=(actor=examples.firstContactEmail)=>buildConsentClaimsSimple({subjectDid:examples.didWeb,actor,actorRole:HealthcareActorRoles.MedicalDoctors,purpose:HealthcareConsentPurposes.Treatment,actions:[section],consentIdentifier:examples.resourceUuid}).consentClaims
 function fixture(){

@@ -4,6 +4,14 @@ The shared SOS Node SDK evaluated the existing clinical organization
 registration runtime capability-by-capability. It did not copy a portal,
 product policy or deployment configuration.
 
+The current implementation uses SOS-owned verification/request contracts,
+an owned encrypted HTTP submit/poll client and an owned communication wallet
+backed by the independent Antifraud cryptography engine. Frozen packages serve
+only as read-only compatibility evidence, not as runtime or test dependencies.
+The reconstructed communication key material and key identifiers match that
+evidence. Profile/identity signing keys remain supplied by the owning workflow;
+the transport wallet creates only its scoped communication keys.
+
 | Capability | Decision | Shared boundary |
 | --- | --- | --- |
 | deterministic controller bootstrap-wallet reconstruction | adopted | trusted Node SDK |

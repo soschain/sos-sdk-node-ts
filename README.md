@@ -75,7 +75,7 @@ The capability-by-capability source decision is recorded in
 [`docs/ORGANIZATION_REGISTRATION_SOURCE_EVALUATION.md`](docs/ORGANIZATION_REGISTRATION_SOURCE_EVALUATION.md).
 
 ```text
-gdc-* frozen
+antifraud-data-utils-ts + fhir-data-utils-ts
     ↓
 sos-data-utils-ts
     ↓
@@ -111,8 +111,8 @@ reuses the same idempotent draft after transient failures, and does not report
 confirmation until the provider write has been followed by authoritative
 readback.
 
-It also does not duplicate the typed clinical Bundle editors exposed by the
-GDC Node SDK. Add a SOS Node adapter only when a real shared channel workflow
+It consumes the SOS data package's batch contracts and the Core-owned
+Communication editors. Add a SOS Node adapter only when a real shared channel workflow
 requires runtime behavior, following the
 [clinical accessor adoption matrix](https://github.com/soschain/sos-data-utils-ts/blob/main/docs/CLINICAL_TYPED_ACCESSOR_ADOPTION.md).
 Portals and assistants without that editor remain on their verified versions.

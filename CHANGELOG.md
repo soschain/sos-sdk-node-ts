@@ -2,9 +2,18 @@
 
 ## Unreleased
 
-- Checkpoint dependency-boundary tests and a memory-vault isolation test. The
-  existing GDC-backed implementation fails these guards; replacement and
-  cumulative validation remain required before merging or releasing.
+- Remove direct frozen-project runtime imports. Use SOS storage, workforce,
+  Consent and Communication contracts plus FHIR and Antifraud utilities.
+- Own encrypted organization verification, reissuance and Order submit/poll.
+  Reconstruct the exact existing communication keys and key identifiers using
+  independent cryptography; reject plaintext terminal responses and rejected
+  submits without polling. Real loopback HTTP and cryptography checks pass.
+- Implement the process-owned transactional memory adapter without a legacy
+  delegate, preserving atomic commit/rollback and isolated record custody.
+
+- Registry promotion remains blocked until the corrected shared package
+  versions are published and the resolved lockfile passes the transitive
+  dependency guard. Runtime/source independence does not establish release readiness.
 
 ## 0.3.1 - 2026-11-13
 

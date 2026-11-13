@@ -1,9 +1,9 @@
 import {evaluateProfessionalConsentCoverage} from 'sos-data-utils-ts/multichannel-permission-forms'
 import {createHash} from 'node:crypto'
-import type {IVaultRepository} from 'gdc-common-utils-ts/storage'
-import {ClaimConsent as C,ConsentStatuses,type ConsentRule} from 'gdc-common-utils-ts/models/consent-rule'
-import {buildConsentClaimsSimple,isValidConsentPeriodBoundary} from 'gdc-common-utils-ts/utils/consent'
-import type {ConsentCoverageRequest,EffectiveAccessEvaluation} from 'gdc-common-utils-ts/models/consent-access'
+import type {IVaultRepository} from 'sos-sdk-core-ts/vault-repository'
+import {ClaimConsent as C,ConsentStatuses,type ConsentRule} from 'fhir-data-utils-ts'
+import {buildConsentClaimsSimple,isValidConsentPeriodBoundary} from 'sos-data-utils-ts/consent-coverage'
+import type {ConsentCoverageRequest,EffectiveAccessEvaluation} from 'sos-data-utils-ts/consent-access'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 
 export type PortalConsentSnapshot=Readonly<{revision:number;claims:readonly Readonly<Record<string,unknown>>[]}>

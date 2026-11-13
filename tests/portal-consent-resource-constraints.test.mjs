@@ -6,10 +6,10 @@ import {TransactionalMemoryVaultRepository} from '../dist/transactional-vault.js
 import {REPOSITORY_SAFE_EXAMPLES as examples} from 'sos-data-utils-ts/repository-privacy'
 import {DemoMemberConsentRoleClaims} from 'sos-data-utils-ts/demo-member-lifecycle'
 import {FHIR_ENCOUNTER_TRANSFER_TEST_DATA as encounter,FHIR_CLINICAL_DOCUMENT_ENCOUNTER_JOURNEY_TEST_DATA as inpatient} from 'fhir-data-utils-ts/data'
-import {ClaimConsent as C,ConsentDecisions} from 'gdc-common-utils-ts/models/consent-rule'
-import {buildConsentClaimsSimple} from 'gdc-common-utils-ts/utils/consent'
-import {HealthcareConsentPurposes} from 'gdc-common-utils-ts/constants/healthcare'
-import {IndividualLogicalSections} from 'gdc-common-utils-ts/constants/individual-sections'
+import {ClaimConsent as C,ConsentDecisions} from 'fhir-data-utils-ts'
+import {buildConsentClaimsSimple} from 'sos-data-utils-ts/consent-coverage'
+import {HealthcareConsentPurposes} from 'fhir-data-utils-ts'
+import {IndividualLogicalSections} from 'sos-data-utils-ts/individual-sections'
 
 const section=IndividualLogicalSections.Encounters.attributeValue
 const emergencyClass=`${encounter.class.system}|${encounter.class.code}`
