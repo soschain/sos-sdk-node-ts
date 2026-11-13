@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-13
+
 - Allow an authorized Consent replacement to commit related changes through the same supplied vault transaction. Authorization and revision checks precede the callback; failure rolls back both the Consent and related writes. The callback performs vault operations only, never external delivery.
 
 ## 0.2.5 - 2026-11-12
