@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Transport a BFF-verified canonical E164 telephone as `PortalDemoCareParticipant.verifiedPhone`, independently of email. Reject malformed/noncanonical peer assertions before invoking care/Consent factories and bind telephone request targets using canonical `tel:` Consent identifiers. The owning host factory still verifies profile authority and constructs `actor.phone`. Six real peer/vault regressions produced two expected failures before implementation; post-change validation and the cumulative release matrix remain pending. No package version change.
+
 ## 0.3.0 - 2026-11-13
 
 - Allow an authorized Consent replacement to commit related changes through the same supplied vault transaction. Authorization and revision checks precede the callback; failure rolls back both the Consent and related writes. The callback performs vault operations only, never external delivery.
