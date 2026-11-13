@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Checkpoint dependency-boundary tests and a memory-vault isolation test. The
+  existing GDC-backed implementation fails these guards; replacement and
+  cumulative validation remain required before merging or releasing.
+
 ## 0.3.1 - 2026-11-13
 
 - Pin Common Utilities 2.9.31 and SOS Data 0.6.35, retaining the runtime and declaration bytes from the cumulative local proof.

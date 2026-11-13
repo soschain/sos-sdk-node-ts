@@ -1,7 +1,24 @@
 // Flow contract: the shared memory vault serializes transactions, commits atomically, rolls back failures and preserves the existing vault interface for every channel.
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { TransactionalMemoryVaultRepository } from '../dist/index.js'
+import {spawnSync} from 'node:child_process'
+import { TransactionalMemoryVaultRepository } from '../dist/transactional-vault.js'
+
+test('loads and executes the SOS memory vault with every GDC module forbidden',()=>{
+  const target=new URL('../dist/transactional-vault.js',import.meta.url).href
+  const result=spawnSync(process.execPath,['--input-type=module','-e',`
+    import {registerHooks} from 'node:module';
+    registerHooks({resolve(specifier,context,nextResolve){
+      if(specifier.startsWith('gdc-'))throw new Error('forbidden_legacy_dependency');
+      return nextResolve(specifier,context);
+    }});
+    const {TransactionalMemoryVaultRepository}=await import(${JSON.stringify(target)});
+    const vault=new TransactionalMemoryVaultRepository();
+    await vault.put('records',{id:'isolated',value:1});
+    if((await vault.get('records','isolated'))?.value!==1)throw new Error('vault_readback_failed');
+  `],{encoding:'utf8'})
+  assert.equal(result.status,0,result.stderr)
+})
 
 test('commits one competing claim and rolls back every write on failure', async () => {
   const vault = new TransactionalMemoryVaultRepository()
