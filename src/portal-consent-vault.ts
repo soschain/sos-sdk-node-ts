@@ -71,11 +71,11 @@ export class PortalConsentVaultProvider{
       return {revision:next.revision,claims:next.claims}
     })
   }
-  evaluate(request:ConsentCoverageRequest):Promise<EffectiveAccessEvaluation>{return this.options.store.runTransaction(transaction=>this.evaluateInTransaction(transaction,request))}
-  async evaluateInTransaction(transaction:IVaultRepository,request:ConsentCoverageRequest):Promise<EffectiveAccessEvaluation>{
+  evaluate(request:ConsentCoverageRequest,resourceContext?:ConsentCoverageRequest['resourceContext']):Promise<EffectiveAccessEvaluation>{return this.options.store.runTransaction(transaction=>this.evaluateInTransaction(transaction,request,resourceContext))}
+  async evaluateInTransaction(transaction:IVaultRepository,request:ConsentCoverageRequest,resourceContext?:ConsentCoverageRequest['resourceContext']):Promise<EffectiveAccessEvaluation>{
     if(request.subject&&request.subject!==this.options.subjectIdentifier)throw new TypeError('consent_subject_mismatch')
     const snapshot=await this.readInTransaction(transaction)
-    return evaluateProfessionalConsentCoverage(snapshot.claims.map(claims=>({...claims}) as unknown as ConsentRule),{...request,subject:this.options.subjectIdentifier,now:new Date(this.now())})
+    return evaluateProfessionalConsentCoverage(snapshot.claims.map(claims=>({...claims}) as unknown as ConsentRule),{...request,...(resourceContext?{resourceContext}:{}),subject:this.options.subjectIdentifier,now:new Date(this.now())})
   }
   private normalize(raw:Readonly<Record<string,unknown>>):Readonly<Record<string,unknown>>{
     if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).some(key=>key!=='@context'&&!key.startsWith('Consent.'))||Object.values(raw).some(value=>typeof value!=='string')||JSON.stringify(raw).length>64_000)throw new TypeError('consent_claims_invalid')

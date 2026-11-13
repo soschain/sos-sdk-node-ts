@@ -39,7 +39,10 @@ async function fixture(t,withCare=true){
   const handler=createPortalDemoExchangeHandler({scope,bearer,exchange,consentProviderFactory:async input=>{
     if(input.subjectIdentifier!==examples.didWeb||input.participant.actorIdentifier!==examples.didWeb)throw new Error('consent_subject_forbidden')
     return {provider:consents,actor:{actorKind:'professional',email:examples.firstContactEmail},actorRole:HealthcareActorRoles.MedicalDoctors}
-  },...(withCare?{careProviderFactory:async input=>{
+  },...(withCare?{careInboxProvider:async input=>{
+    if(input.participant.actorIdentifier!==examples.didWeb)throw new Error('care_inbox_forbidden')
+    return [examples.didWeb]
+  },careProviderFactory:async input=>{
     factoryCalls++
     if(input.subjectIdentifier!==examples.didWeb||input.participant.actorIdentifier!==examples.didWeb)throw new Error('care_subject_forbidden')
     return provider
@@ -58,6 +61,25 @@ async function fixture(t,withCare=true){
   return {scope,store,provider,consents,bearer,baseUrl,exchange,client:new PortalDemoExchangeClient({baseUrl,bearer}),factoryCalls:()=>factoryCalls,
     participant:{actorIdentifier:examples.didWeb}}
 }
+
+test('accepts host-validated permission audit context for a private organization',async t=>{
+ const f=await fixture(t)
+ const claims={...buildConsentClaimsSimple({subjectDid:examples.didWeb,actor:examples.firstContactEmail,actorRole:HealthcareActorRoles.MedicalDoctors,purpose:HealthcareConsentPurposes.Treatment,actions:[IndividualLogicalSections.Encounters.attributeValue],consentIdentifier:examples.resourceUuid}).consentClaims,[C.status]:'draft'}
+ const participant={...f.participant,profileId:'doctor',organizationReference:`Organization/${examples.resourceUuid}`}
+ const requestContext={organizationLabel:'Private Demo organization',organizationDid:examples.didWeb,roleLabel:'Doctor'}
+ await f.store.runTransaction(transaction=>f.exchange.recordPermissionRequest(f.scope,examples.didWeb,participant,claims,transaction,false,requestContext))
+ const requests=await f.exchange.listPermissionRequests(f.scope,examples.didWeb,examples.didWeb)
+ assert.equal(requests[0].organizationLabel,requestContext.organizationLabel)
+ assert.equal(requests[0].organizationDid,requestContext.organizationDid)
+})
+
+test('recipient inbox discovery crosses real HTTP without a caller-supplied subject',async t=>{
+  const f=await fixture(t)
+  assert.deepEqual(await f.client.careInboxSubjects(f.scope,f.participant),[examples.didWeb])
+  await assert.rejects(f.client.careInboxSubjects(f.scope,{actorIdentifier:examples.firstContactIdentifier}),/care_inbox_forbidden/u)
+  const other=new PortalDemoExchangeClient({baseUrl:f.baseUrl,bearer:'fixture-wrong-token-at-least-32-characters'})
+  await assert.rejects(other.careInboxSubjects(f.scope,f.participant),/demo_exchange_unauthorized/u)
+})
 
 test('an authenticated peer reads and updates the same persisted care resource over HTTP',async t=>{
   const f=await fixture(t)

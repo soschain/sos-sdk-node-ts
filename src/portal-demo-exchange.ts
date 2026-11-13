@@ -37,7 +37,7 @@ export class PortalDemoExchange {
   }> }>) {}
   private now() {return (this.options.now??Date.now)()}
   /** One auditable Communication carries the requested Consent Bundle; this never activates its draft rules. */
-  async recordPermissionRequest(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoParticipant,claims:Readonly<Record<string,unknown>>,transaction:IVaultRepository,replay:boolean):Promise<void>{
+  async recordPermissionRequest(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoParticipant,claims:Readonly<Record<string,unknown>>,transaction:IVaultRepository,replay:boolean,requestContext?:Omit<PortalPermissionRequestContext,'consentIdentifier'|'requestedAt'>):Promise<void>{
     const names=collections(scope)
     const cards=await transaction.query<CardRecord>(names.cards,{where:[{attribute:'subjectIdentifier',equals:subjectIdentifier}]})
     const active=cards.filter(card=>card.expiresAt>this.now())
@@ -52,8 +52,10 @@ export class PortalDemoExchange {
     const occurredAt=new Date(this.now()).toISOString()
     const organization=SOSCHAIN_DEMO_ORGANIZATIONS.find(item=>item.organizationUrn.replace('urn:uuid:','Organization/')===participant.organizationReference)
     const profile=SOSCHAIN_PROFESSIONAL_DEMO_PROFILES.find(item=>item.enabled&&item.id===participant.profileId&&item.sector===organization?.sector)
-    if((participant.organizationReference||participant.profileId)&&(!organization||!profile))throw new Error('consent_request_context_forbidden')
-    const requester=organization&&profile?{consentIdentifier:String(claims[ClaimConsent.identifier]),organizationLabel:organization.titleEn,organizationDid:organization.organizationDid,roleLabel:profile.titleEn,requestedAt:occurredAt}:undefined
+    if(requestContext&&[requestContext.organizationLabel,requestContext.organizationDid,requestContext.roleLabel].some(value=>typeof value!=='string'||!value.trim()||value.length>2048))throw new Error('consent_request_context_forbidden')
+    if(!requestContext&&(participant.organizationReference||participant.profileId)&&(!organization||!profile))throw new Error('consent_request_context_forbidden')
+    const context=requestContext??(organization&&profile?{organizationLabel:organization.titleEn,organizationDid:organization.organizationDid,roleLabel:profile.titleEn}:undefined)
+    const requester=context?{consentIdentifier:String(claims[ClaimConsent.identifier]),...context,requestedAt:occurredAt}:undefined
     const bundle={resourceType:'Bundle',type:'collection',data:[{resource:{resourceType:'Consent',meta:{claims}}}]}
     const draft=createCommMsgExtendedDraft({messageId:id,thid:`${id}-request`,subject:subjectIdentifier,sender:participant.actorIdentifier,sent:occurredAt,status:'completed',category:CommunicationCategoryCodes.Notification.claim,
       claims:{[CommunicationClaim.Identifier]:id,[CommunicationClaim.Recipient]:card.controllerActorIdentifier,[CommunicationClaim.ContentAttachmentType]:HttpMediaTypes.FhirJson,[CommunicationClaim.ContentAttachmentTitle]:'permission-request.json',[CommunicationClaim.ContentAttachmentData]:Buffer.from(JSON.stringify(bundle)).toString('base64')}})
@@ -182,13 +184,33 @@ export class PortalDemoExchange {
 }
 
 /** These fields are supplied only by the authenticated peer BFF after resolving its protected profile. */
-export type PortalDemoCareParticipant=PortalDemoParticipant & Readonly<{profileId?:string;profileExpiresAt?:number;organizationReference?:string;sector?:string;departmentId?:string;encounterWrite?:boolean;verifiedEmail?:string;roleClaim?:string}>
+export type PortalDemoCareParticipant=PortalDemoParticipant & Readonly<{profileId?:string;profileExpiresAt?:number;organizationReference?:string;organizationSpaceKey?:string;sector?:string;departmentId?:string;encounterWrite?:boolean;schedulingWrite?:boolean;verifiedEmail?:string;roleClaim?:string}>
+
+/** BFF-only input: callers derive the account identifier from verified authentication, never a form field. */
+export function derivePortalDemoOrganizationIdentity(scopeKey:string,accountIdentifier:string,sector:string){
+  if(typeof accountIdentifier!=='string'||!accountIdentifier.trim())throw new TypeError('demo_organization_account_required')
+  const spaceKey=createHash('sha256').update(`private-demo-account-v1\0${scopeKey}\0${accountIdentifier.trim().toLowerCase()}`).digest('hex')
+  return derivePortalDemoOrganizationIdentityFromSpace(scopeKey,spaceKey,sector)
+}
+export function derivePortalDemoOrganizationIdentityFromSpace(scopeKey:string,spaceKey:string,sector:string){
+  if(typeof scopeKey!=='string'||!scopeKey||!(/^[a-f0-9]{64}$/u.test(spaceKey))||typeof sector!=='string'||!sector)throw new TypeError('demo_organization_scope_invalid')
+  const uuid=(value:string)=>{
+    const bytes=createHash('sha256').update(value).digest().subarray(0,16)
+    bytes[6]=(bytes[6]&0x0f)|0x80;bytes[8]=(bytes[8]&0x3f)|0x80
+    const hex=bytes.toString('hex');return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`
+  }
+  const organizationUuid=uuid(`private-demo-organization-v1\0${scopeKey}\0${spaceKey}\0${sector}`)
+  return Object.freeze({spaceKey,organizationUuid,controllerActorIdentifier:`urn:uuid:${uuid(`private-demo-controller-v1\0${organizationUuid}`)}`})
+}
 export type PortalDemoConsentOperation=Readonly<{kind:'inspect';purpose:string;sections:string[];resourceTypes?:string[]}>|Readonly<{kind:'request';claims:Readonly<Record<string,unknown>>}>
 export type PortalDemoConsentEvaluation=Pick<EffectiveAccessEvaluation,'allowed'|'denied'|'partial'|'allowedSections'|'deniedSections'|'allowedResourceTypes'|'deniedResourceTypes'|'missing'>
 export type PortalDemoConsentResult=Readonly<{kind:'evaluation';evaluation:PortalDemoConsentEvaluation}>|Readonly<{kind:'request';claims:Readonly<Record<string,unknown>>}>
-export type PortalDemoConsentProviderFactory=(input:Readonly<{scope:DemoWorkspaceScope;subjectIdentifier:string;participant:PortalDemoCareParticipant}>)=>Promise<Readonly<{provider:PortalConsentVaultProvider;actor:ConsentActorDescriptor;actorRole:string}>>
+export type PortalDemoConsentProviderFactory=(input:Readonly<{scope:DemoWorkspaceScope;subjectIdentifier:string;participant:PortalDemoCareParticipant}>)=>Promise<Readonly<{provider:PortalConsentVaultProvider;actor:ConsentActorDescriptor;actorRole:string;requestContext?:Omit<PortalPermissionRequestContext,'consentIdentifier'|'requestedAt'>}>>
 export type PortalDemoCareProviderFactory=(input:Readonly<{scope:DemoWorkspaceScope;subjectIdentifier:string;participant:PortalDemoCareParticipant}>)=>Promise<PortalCareVaultProvider>
-export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory;consentProviderFactory?:PortalDemoConsentProviderFactory}>) {
+export type PortalDemoCareInboxProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant}>)=>Promise<readonly string[]>
+export type PortalDemoCatalogSnapshot=OrganizationCatalogVaultSnapshot&Readonly<{directory?:readonly import('sos-data-utils-ts/portal-demo-service-directory').PortalDemoServiceDirectoryEntry[]}>
+export type PortalDemoCatalogProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;catalog:OrganizationCatalogVaultOperation}>)=>Promise<PortalDemoCatalogSnapshot>
+export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory;careInboxProvider?:PortalDemoCareInboxProvider;consentProviderFactory?:PortalDemoConsentProviderFactory;catalogProvider?:PortalDemoCatalogProvider}>) {
   const authorized=serviceCredential(options.bearer)
   collections(options.scope)
   return async(request:Request):Promise<Response>=>{
@@ -196,13 +218,23 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
     if (request.method!=='POST') return Response.json({error:'method_not_allowed'},{status:405})
     try {
       const text=await request.text();if(Buffer.byteLength(text)>32_768) return Response.json({error:'demo_exchange_request_too_large'},{status:413})
-      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;consent:PortalDemoConsentOperation}
+      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;consent:PortalDemoConsentOperation;catalog:OrganizationCatalogVaultOperation}
       collections(body.scope)
       if(body.scope.key!==options.scope.key) return Response.json({error:'demo_exchange_scope_forbidden'},{status:403})
+      if(body.operation==='catalog'){
+        if(!options.catalogProvider)throw new Error('demo_catalog_provider_unavailable')
+        if(typeof body.participant?.actorIdentifier!=='string'||!body.participant.actorIdentifier)throw new TypeError('catalog_request_invalid')
+        return Response.json({result:await options.catalogProvider({scope:body.scope,participant:body.participant,catalog:body.catalog})})
+      }
+      if(body.operation==='careInboxSubjects'){
+        if(!options.careInboxProvider)throw new Error('demo_care_provider_unavailable')
+        if(typeof body.participant?.actorIdentifier!=='string'||!body.participant.actorIdentifier)throw new TypeError('care_request_invalid')
+        return Response.json({result:await options.careInboxProvider({scope:body.scope,participant:body.participant})})
+      }
       if(body.operation==='consent'){
         if(!options.consentProviderFactory)throw new Error('demo_consent_provider_unavailable')
         if(typeof body.subjectIdentifier!=='string'||!body.subjectIdentifier||typeof body.participant?.actorIdentifier!=='string'||!body.participant.actorIdentifier)throw new TypeError('consent_request_invalid')
-        const {provider,actor,actorRole}=await options.consentProviderFactory({scope:body.scope,subjectIdentifier:body.subjectIdentifier,participant:body.participant})
+        const {provider,actor,actorRole,requestContext}=await options.consentProviderFactory({scope:body.scope,subjectIdentifier:body.subjectIdentifier,participant:body.participant})
         const operation=body.consent
         if(operation?.kind==='inspect'){
           if(Object.keys(operation).some(key=>!['kind','purpose','sections','resourceTypes'].includes(key))||!Array.isArray(operation.sections)||operation.sections.length>100||operation.sections.some(value=>typeof value!=='string')||typeof operation.purpose!=='string')throw new TypeError('consent_request_invalid')
@@ -215,7 +247,7 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
           const allowedTargets=[actor.email,actor.did,...(actor.aliases??[]),actor.organizationDid,actor.organizationUrl,actor.jurisdiction,actor.phone].filter((value):value is string=>typeof value==='string').map(value=>normalizeConsentTarget(value)).filter(target=>target.kind!=='unknown').map(target=>target.canonicalValue)
           const targets=String(operation.claims?.[ClaimConsent.actorIdentifier]||'').split(',').filter(Boolean).map(value=>normalizeConsentTarget(value))
           if(operation.claims?.[ClaimConsent.actorRole]!==actorRole||!targets.length||targets.some(target=>target.kind==='unknown'||!allowedTargets.includes(target.canonicalValue)))throw new Error('consent_request_actor_forbidden')
-          const result=await provider.requestDraft(operation.claims,(transaction,claims,replay)=>options.exchange.recordPermissionRequest(body.scope,body.subjectIdentifier,body.participant,claims,transaction,replay))
+          const result=await provider.requestDraft(operation.claims,(transaction,claims,replay)=>options.exchange.recordPermissionRequest(body.scope,body.subjectIdentifier,body.participant,claims,transaction,replay,requestContext))
           return Response.json({result:{kind:'request',claims:result.claims.find(claims=>claims[ClaimConsent.identifier]===operation.claims[ClaimConsent.identifier])}})
         }
         throw new TypeError('consent_request_invalid')
@@ -234,9 +266,9 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
       return Response.json({result:result??null})
     } catch(error) {
       const message=error instanceof Error?error.message:''
-      const code=/^(?:demo_|portal_rtc_|care_|encounter_|consent_)[a-z0-9_]+$/u.test(message)?message
+      const code=/^(?:demo_|portal_rtc_|care_|encounter_|consent_|catalog_)[a-z0-9_]+$/u.test(message)?message
         :error instanceof SyntaxError||error instanceof TypeError?'demo_exchange_request_invalid':'demo_exchange_failed'
-      const status=code==='demo_exchange_failed'?502:['demo_care_provider_unavailable','demo_consent_provider_unavailable'].includes(code)?503:code==='care_context_expired'?401
+      const status=code==='demo_exchange_failed'?502:['demo_care_provider_unavailable','demo_consent_provider_unavailable','demo_catalog_provider_unavailable'].includes(code)?503:code==='care_context_expired'?401
         :code==='demo_card_not_found'||code.startsWith('care_')&&code.endsWith('_not_found')?404
           :/forbidden|required|identity_mismatch/u.test(code)?403:/transition_invalid|revision_conflict|resource_conflict|idempotency_conflict|request_conflict/u.test(code)?409:400
       return Response.json({error:code},{status})
@@ -255,6 +287,8 @@ export class PortalDemoExchangeClient {
   listEvents(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoParticipant):Promise<PortalRtcCallEvent[]> {return this.call({operation:'listEvents',scope,subjectIdentifier,participant})}
   async submitEvent(scope:DemoWorkspaceScope,event:PortalRtcCallEvent,participant:PortalDemoParticipant):Promise<void> {await this.call({operation:'submitEvent',scope,event,participant})}
   care(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoCareParticipant,care:PortalCareOperation):Promise<PortalCareOperationResult>{return this.call({operation:'care',scope,subjectIdentifier,participant,care})}
+  careInboxSubjects(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant):Promise<readonly string[]>{return this.call({operation:'careInboxSubjects',scope,participant})}
+  catalog(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant,catalog:OrganizationCatalogVaultOperation):Promise<PortalDemoCatalogSnapshot>{return this.call({operation:'catalog',scope,participant,catalog})}
   consent(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoCareParticipant,consent:PortalDemoConsentOperation):Promise<PortalDemoConsentResult>{return this.call({operation:'consent',scope,subjectIdentifier,participant,consent})}
   private async call<T>(body:object):Promise<T> {
     const response=await (this.options.fetchImpl??fetch)(this.url,{method:'POST',headers:{authorization:`Bearer ${this.options.bearer}`,'content-type':'application/json'},body:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(15_000)})
@@ -279,3 +313,4 @@ function eventFromCommunication(record:CommunicationRecord):PortalRtcCallEvent {
   return normalizePortalRtcCallEvent(JSON.parse(Buffer.from(String(message.body.data[0].resource.meta.claims[CommunicationClaim.ContentAttachmentData]),'base64').toString('utf8')))
 }
 function isCallRecord(record:CommunicationRecord){return typeof record.callId==='string'&&record.callId.length>0}
+import type {OrganizationCatalogVaultOperation,OrganizationCatalogVaultSnapshot} from './organization-catalog-vault.js'

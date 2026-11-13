@@ -13,6 +13,19 @@ const event = {version:1,callId:'call-1',threadId:'thread-1',subjectIdentifier:c
 const professional={actorIdentifier:event.callerActorIdentifier,professionalGroupReference:event.professionalGroupReference}
 const controller={actorIdentifier:card.controllerActorIdentifier}
 
+test('discovers only provider-authorized care inbox subjects over the authenticated peer transport',async()=>{
+  const exchange=new PortalDemoExchange({store:new TransactionalMemoryVaultRepository()})
+  let requests=0
+  const bearer='fixture-service-token-at-least-32-characters'
+  const handle=createPortalDemoExchangeHandler({exchange,scope,bearer,careInboxProvider:async input=>{requests++;assert.equal(input.participant.actorIdentifier,professional.actorIdentifier);return [card.subjectIdentifier]}})
+  const client=new PortalDemoExchangeClient({baseUrl:'http://localhost:4317',bearer,fetchImpl:async(url,init)=>handle(new Request(url,init))})
+  assert.deepEqual(await client.careInboxSubjects(scope,professional),[card.subjectIdentifier])
+  assert.equal(requests,1)
+  const denied=await handle(new Request('http://localhost/api/internal/demo/exchange',{method:'POST',body:JSON.stringify({operation:'careInboxSubjects',scope,participant:professional})}))
+  assert.equal(denied.status,401)
+  assert.equal(requests,1)
+})
+
 test('shares a card and one Communication history across BFF clients without a GW',async()=>{
   const store=new TransactionalMemoryVaultRepository()
   const exchange=new PortalDemoExchange({store})
