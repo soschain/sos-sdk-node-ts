@@ -30,7 +30,11 @@ export class PortalConsentVaultProvider{
     if(record.scopeKey!==this.options.scopeKey||record.generationId!==this.options.generationId||record.subjectIdentifier!==this.options.subjectIdentifier||!Number.isFinite(record.expiresAt)||record.expiresAt<=this.now()||!Number.isInteger(record.revision)||record.revision<1)throw new Error('consent_context_forbidden')
     return {revision:record.revision,claims:record.claims.map(claims=>this.normalize(claims))}
   }
-  async replace(raw:readonly Readonly<Record<string,unknown>>[],expectedRevision:number):Promise<PortalConsentSnapshot>{
+  /** The optional host hook couples related vault changes to this authorized revision.
+   * It must use only the supplied transaction port, finish reads before writes,
+   * and never perform an external side effect. A thrown error rolls everything back.
+   */
+  async replace(raw:readonly Readonly<Record<string,unknown>>[],expectedRevision:number,commitRelatedChanges?:(transaction:IVaultRepository)=>Promise<void>):Promise<PortalConsentSnapshot>{
     if(!Array.isArray(raw)||raw.length>100||!Number.isInteger(expectedRevision)||expectedRevision<0||JSON.stringify(raw).length>1_000_000)throw new TypeError('consent_snapshot_invalid')
     const claims=raw.map(item=>this.normalize(item))
     if(new Set(claims.map(item=>item[C.identifier])).size!==claims.length)throw new TypeError('consent_identifier_duplicate')
@@ -38,6 +42,7 @@ export class PortalConsentVaultProvider{
       await this.authorize(transaction,'write')
       const current=await this.readInTransaction(transaction)
       if(current.revision!==expectedRevision)throw new Error('consent_revision_conflict')
+      await commitRelatedChanges?.(transaction)
       const next:RecordState={id:this.id,scopeKey:this.options.scopeKey,generationId:this.options.generationId,subjectIdentifier:this.options.subjectIdentifier,expiresAt:this.options.expiresAt,revision:current.revision+1,claims}
       await transaction.put(this.collectionName,next)
       return {revision:next.revision,claims:next.claims}
