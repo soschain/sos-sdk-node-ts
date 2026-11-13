@@ -1,5 +1,6 @@
 import {SOSCHAIN_DEMO_ORGANIZATIONS,SOSCHAIN_PROFESSIONAL_DEMO_PROFILES} from 'sos-data-utils-ts/portal-access-profiles'
 import {normalizeConsentTarget} from 'gdc-common-utils-ts/utils/consent'
+import {normalizeProfileIndexContact,ProfileIndexContactKind} from 'sos-data-utils-ts/confidential-profile-index'
 import type {PortalConsentVaultProvider} from './portal-consent-vault.js'
 import type {ConsentActorDescriptor,EffectiveAccessEvaluation} from 'gdc-common-utils-ts/models/consent-access'
 import {ClaimConsent} from 'gdc-common-utils-ts/models/consent-rule'
@@ -184,7 +185,7 @@ export class PortalDemoExchange {
 }
 
 /** These fields are supplied only by the authenticated peer BFF after resolving its protected profile. */
-export type PortalDemoCareParticipant=PortalDemoParticipant & Readonly<{profileId?:string;profileExpiresAt?:number;organizationReference?:string;organizationSpaceKey?:string;sector?:string;departmentId?:string;encounterWrite?:boolean;schedulingWrite?:boolean;verifiedEmail?:string;roleClaim?:string}>
+export type PortalDemoCareParticipant=PortalDemoParticipant & Readonly<{profileId?:string;profileExpiresAt?:number;organizationReference?:string;organizationSpaceKey?:string;sector?:string;departmentId?:string;encounterWrite?:boolean;schedulingWrite?:boolean;verifiedEmail?:string;verifiedPhone?:string;roleClaim?:string}>
 
 /** BFF-only input: callers derive the account identifier from verified authentication, never a form field. */
 export function derivePortalDemoOrganizationIdentity(scopeKey:string,accountIdentifier:string,sector:string){
@@ -221,6 +222,7 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
       const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;consent:PortalDemoConsentOperation;catalog:OrganizationCatalogVaultOperation}
       collections(body.scope)
       if(body.scope.key!==options.scope.key) return Response.json({error:'demo_exchange_scope_forbidden'},{status:403})
+      if(['consent','care','catalog','careInboxSubjects'].includes(body.operation))validateVerifiedPhone(body.participant?.verifiedPhone)
       if(body.operation==='catalog'){
         if(!options.catalogProvider)throw new Error('demo_catalog_provider_unavailable')
         if(typeof body.participant?.actorIdentifier!=='string'||!body.participant.actorIdentifier)throw new TypeError('catalog_request_invalid')
@@ -244,7 +246,8 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
         }
         if(operation?.kind==='request'){
           if(Object.keys(operation).some(key=>!['kind','claims'].includes(key)))throw new TypeError('consent_request_invalid')
-          const allowedTargets=[actor.email,actor.did,...(actor.aliases??[]),actor.organizationDid,actor.organizationUrl,actor.jurisdiction,actor.phone].filter((value):value is string=>typeof value==='string').map(value=>normalizeConsentTarget(value)).filter(target=>target.kind!=='unknown').map(target=>target.canonicalValue)
+          const telephoneTarget=actor.phone?`tel:${normalizeProfileIndexContact(ProfileIndexContactKind.Telephone,actor.phone)}`:undefined
+          const allowedTargets=[actor.email,actor.did,...(actor.aliases??[]),actor.organizationDid,actor.organizationUrl,actor.jurisdiction,telephoneTarget].filter((value):value is string=>typeof value==='string').map(value=>normalizeConsentTarget(value)).filter(target=>target.kind!=='unknown').map(target=>target.canonicalValue)
           const targets=String(operation.claims?.[ClaimConsent.actorIdentifier]||'').split(',').filter(Boolean).map(value=>normalizeConsentTarget(value))
           if(operation.claims?.[ClaimConsent.actorRole]!==actorRole||!targets.length||targets.some(target=>target.kind==='unknown'||!allowedTargets.includes(target.canonicalValue)))throw new Error('consent_request_actor_forbidden')
           const result=await provider.requestDraft(operation.claims,(transaction,claims,replay)=>options.exchange.recordPermissionRequest(body.scope,body.subjectIdentifier,body.participant,claims,transaction,replay,requestContext))
@@ -307,6 +310,12 @@ function collections(scope:DemoWorkspaceScope) {
 function hash(value:string) {return createHash('sha256').update(value).digest('hex')}
 function serviceCredential(value:string) {try{return createBffServiceBearerVerifier(value)}catch{throw new Error('demo_exchange_service_credential_required')}}
 function isParticipant(event:PortalRtcCallEvent,participant:PortalDemoParticipant) {return participant.actorIdentifier===event.recipientActorIdentifier||(participant.actorIdentifier===event.callerActorIdentifier&&participant.professionalGroupReference===event.professionalGroupReference)}
+function validateVerifiedPhone(value:unknown):void{
+  if(value===undefined)return
+  try{
+    if(typeof value!=='string'||normalizeProfileIndexContact(ProfileIndexContactKind.Telephone,value)!==value)throw new TypeError('demo_exchange_request_invalid')
+  }catch{throw new TypeError('demo_exchange_request_invalid')}
+}
 function sameCall(a:PortalRtcCallEvent,b:PortalRtcCallEvent) {return ['threadId','subjectIdentifier','professionalGroupReference','callerActorIdentifier','recipientActorIdentifier'].every(key=>a[key as keyof PortalRtcCallEvent]===b[key as keyof PortalRtcCallEvent])&&a.media.join(',')===b.media.join(',')&&JSON.stringify(a.context)===JSON.stringify(b.context)}
 function eventFromCommunication(record:CommunicationRecord):PortalRtcCallEvent {
   const message=record.communication as unknown as {body:{data:Array<{resource:{meta:{claims:Record<string,unknown>}}}>}}

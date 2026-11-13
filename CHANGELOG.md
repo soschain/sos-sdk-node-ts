@@ -7,6 +7,7 @@
 - Add injected-vault workforce and organization-catalog providers: one-use invitation activation, delivery status, licence lifecycle, group memberships and revision-checked publication. Add the authorized peer catalog port and host-validated permission audit labels for private organization identities; keep authentication and sector policy in the host.
 
 - Add recipient care-inbox subject discovery to the authenticated Demo peer transport through an injected host authorization provider. Expose the canonical care-resource collection name for that scope query without introducing another store or product policy.
+- Transport a BFF-verified canonical E164 telephone as `PortalDemoCareParticipant.verifiedPhone`, independently of email. Reject malformed/noncanonical peer assertions before invoking care/Consent factories and bind telephone request targets using canonical `tel:` Consent identifiers. The owning host factory still verifies profile authority and constructs `actor.phone`. Six real peer/vault regressions produced two expected failures before implementation; post-change validation and the cumulative release matrix remain pending. No package version change.
 
 ## 0.3.0 - 2026-11-13
 
