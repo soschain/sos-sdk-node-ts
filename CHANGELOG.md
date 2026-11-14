@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Provide host-selected AES-GCM and Google KMS profile sealers over the existing
+  Core port. Preserve existing ciphertext envelopes and AAD without choosing a
+  runtime mode, replacing a custody key or rotating stored wallet seeds.
+
 - Submit individual registration and recipient Order confirmation through owned
   bootstrap or registered signed/encrypted transport. Bind actual gateway
   identities, Offers, response signatures and separate controller assignments.

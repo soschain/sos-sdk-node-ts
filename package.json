@@ -12,6 +12,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./profile-sealer": {
+      "types": "./dist/profile-sealer.d.ts",
+      "default": "./dist/profile-sealer.js"
+    },
     "./individual-registration-client": {
       "types": "./dist/individual-registration-client.d.ts",
       "default": "./dist/individual-registration-client.js"

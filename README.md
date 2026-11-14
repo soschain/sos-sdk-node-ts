@@ -27,6 +27,8 @@ Product-neutral Node adapters for trusted SOSCHAIN runtimes.
 Individual registration, verified encrypted responses and recovery of existing
 registered communication keys are documented in
 [`docs/INDIVIDUAL_REGISTRATION.md`](docs/INDIVIDUAL_REGISTRATION.md).
+Host-selected custody adapters are described in
+[`docs/PROFILE_SEALING.md`](docs/PROFILE_SEALING.md).
 
 ## BFF-owned synthetic Demo exchange
 
