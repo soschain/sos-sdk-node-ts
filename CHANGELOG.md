@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Remove direct frozen-project runtime imports. Use SOS storage, workforce,
-  Consent and Communication contracts plus FHIR and Antifraud utilities.
+- Replace direct imports from <https://github.com/Global-DataCare/gdc-common-utils-ts>
+  with SOS storage, workforce, Consent and Communication contracts plus FHIR and
+  Antifraud utilities.
 - Own encrypted organization verification, reissuance and Order submit/poll.
   Reconstruct the exact existing communication keys and key identifiers using
   independent cryptography; reject plaintext terminal responses and rejected
@@ -14,6 +15,8 @@
 - Registry promotion remains blocked until the corrected shared package
   versions are published and the resolved lockfile passes the transitive
   dependency guard. Runtime/source independence does not establish release readiness.
+  The latest full check passes 157 of 158 tests with no skips; the remaining
+  failure is that registry dependency guard.
 
 ## 0.3.1 - 2026-11-13
 
