@@ -19,6 +19,9 @@ import type {SoschainDemoContact,SoschainDemoSubject} from 'sos-data-utils-ts/po
 import type {PortalCareVaultProvider,PortalCareOperation,PortalCareOperationResult} from './portal-care-vault.js'
 import {normalizeSubjectRegistrationCommand,assertProvisionalSubjectRegistrationReceipt,type SubjectRegistrationCommand,type ProvisionalSubjectRegistrationReceipt} from 'sos-data-utils-ts/provisional-subject-registration'
 import type {OrganizationSubjectRegisterCapability} from 'sos-data-utils-ts/organization-workflow-access'
+import {normalizePendingSubjectEvidenceCommand,assertPendingSubjectEvidenceReceipt,PendingSubjectEvidencePolicy,type PendingSubjectEvidenceCommand,type PendingSubjectEvidenceReceipt} from 'sos-data-utils-ts/provisional-subject-evidence'
+import {buildDidCommInlineBinaryAttachment,buildSha3_384EvidenceContentIdFromDigest} from 'antifraud-data-utils-ts/identity-assurance'
+import type {PendingSubjectEvidenceUploadDocument} from './provisional-subject-evidence-vault.js'
 
 /** Minimal synthetic directory projection; it does not convey real subject authority. */
 export type PortalDemoCard = Partial<Pick<SoschainDemoSubject,'cardDid'|'ncbiTaxonomyId'|'providerCode9'|'relationship'>> & Readonly<{
@@ -215,17 +218,37 @@ export type PortalDemoCatalogSnapshot=OrganizationCatalogVaultSnapshot&Readonly<
 export type PortalDemoCatalogProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;catalog:OrganizationCatalogVaultOperation}>)=>Promise<PortalDemoCatalogSnapshot>
 export type PortalDemoRegistrationProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;command:SubjectRegistrationCommand}>)=>Promise<ProvisionalSubjectRegistrationReceipt>
 export type PortalDemoRegistrationReadProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;registrationId:string}>)=>Promise<ProvisionalSubjectRegistrationReceipt>
-export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory;careInboxProvider?:PortalDemoCareInboxProvider;consentProviderFactory?:PortalDemoConsentProviderFactory;catalogProvider?:PortalDemoCatalogProvider;registrationProvider?:PortalDemoRegistrationProvider;registrationReadProvider?:PortalDemoRegistrationReadProvider}>) {
+export type PortalDemoSubjectEvidenceProvider=Readonly<{
+ submit(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;command:PendingSubjectEvidenceCommand;documents:readonly PendingSubjectEvidenceUploadDocument[]}>):Promise<PendingSubjectEvidenceReceipt>
+ read(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;registrationId:string}>):Promise<PendingSubjectEvidenceReceipt>
+}>
+const EVIDENCE_TRANSFER_HEADER='x-portal-evidence-transfer'
+// Each file rounds independently; reserve separate bounded JSON/metadata overhead.
+const EVIDENCE_TRANSFER_LIMIT=PendingSubjectEvidencePolicy.maxFiles*4*Math.ceil(PendingSubjectEvidencePolicy.maxFileBytes/3)+64*1024
+export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory;careInboxProvider?:PortalDemoCareInboxProvider;consentProviderFactory?:PortalDemoConsentProviderFactory;catalogProvider?:PortalDemoCatalogProvider;registrationProvider?:PortalDemoRegistrationProvider;registrationReadProvider?:PortalDemoRegistrationReadProvider;subjectEvidenceProvider?:PortalDemoSubjectEvidenceProvider}>) {
   const authorized=serviceCredential(options.bearer)
   collections(options.scope)
   return async(request:Request):Promise<Response>=>{
     if (!authorized(request.headers.get('authorization'))) return Response.json({error:'demo_exchange_unauthorized'},{status:401})
     if (request.method!=='POST') return Response.json({error:'method_not_allowed'},{status:405})
     try {
-      const text=await request.text();if(Buffer.byteLength(text)>32_768) return Response.json({error:'demo_exchange_request_too_large'},{status:413})
-      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;consent:PortalDemoConsentOperation;catalog:OrganizationCatalogVaultOperation;command:unknown;registrationId:string}
+      const evidenceTransfer=request.headers.get(EVIDENCE_TRANSFER_HEADER)==='1'
+      const declaredLength=request.headers.get('content-length')
+      if(evidenceTransfer&&declaredLength!==null&&(!/^\d+$/u.test(declaredLength)||Number(declaredLength)>EVIDENCE_TRANSFER_LIMIT))return Response.json({error:'subject_registration_evidence_too_large'},{status:413})
+      const text=evidenceTransfer?await boundedEvidenceText(request):await request.text();if(!evidenceTransfer&&Buffer.byteLength(text)>32_768) return Response.json({error:'demo_exchange_request_too_large'},{status:413})
+      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;consent:PortalDemoConsentOperation;catalog:OrganizationCatalogVaultOperation;command:unknown;registrationId:string;documents:unknown}
+      if(evidenceTransfer&&body.operation!=='submitSubjectEvidence')throw new TypeError('subject_registration_evidence_transfer_invalid')
       collections(body.scope)
       if(body.scope.key!==options.scope.key) return Response.json({error:'demo_exchange_scope_forbidden'},{status:403})
+      if(body.operation==='submitSubjectEvidence'||body.operation==='readSubjectEvidence'){
+        if(!options.subjectEvidenceProvider)throw new Error('subject_registration_evidence_provider_unavailable')
+        validateVerifiedPhone(body.participant?.verifiedPhone)
+        const result=body.operation==='submitSubjectEvidence'
+          ?await options.subjectEvidenceProvider.submit({scope:body.scope,participant:body.participant,command:normalizePendingSubjectEvidenceCommand(body.command),documents:decodeEvidenceDocuments(body.documents)})
+          :await options.subjectEvidenceProvider.read({scope:body.scope,participant:body.participant,registrationId:registrationIdentifier(body.registrationId)})
+        assertPendingSubjectEvidenceReceipt(result)
+        return Response.json({result})
+      }
       if(body.operation==='registerSubject'){
         if(!options.registrationProvider)throw new Error('subject_registration_provider_unavailable')
         validateVerifiedPhone(body.participant?.verifiedPhone)
@@ -290,8 +313,8 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
       const message=error instanceof Error?error.message:''
       const code=/^(?:demo_|portal_rtc_|care_|encounter_|consent_|catalog_|subject_registration_)[a-z0-9_]+$/u.test(message)?message
         :error instanceof SyntaxError||error instanceof TypeError?'demo_exchange_request_invalid':'demo_exchange_failed'
-      const status=code==='demo_exchange_failed'?502:['demo_care_provider_unavailable','demo_consent_provider_unavailable','demo_catalog_provider_unavailable','subject_registration_provider_unavailable'].includes(code)?503:code==='care_context_expired'?401
-        :code==='demo_card_not_found'||code.startsWith('care_')&&code.endsWith('_not_found')||code==='subject_registration_not_found'?404
+      const status=code==='demo_exchange_failed'?502:code==='subject_registration_evidence_too_large'?413:code==='subject_registration_evidence_expired'?410:code==='subject_registration_evidence_integrity'?409:['demo_care_provider_unavailable','demo_consent_provider_unavailable','demo_catalog_provider_unavailable','subject_registration_provider_unavailable','subject_registration_evidence_provider_unavailable'].includes(code)?503:code==='care_context_expired'?401
+        :code==='demo_card_not_found'||code.startsWith('care_')&&code.endsWith('_not_found')||code.startsWith('subject_registration_')&&code.endsWith('_not_found')?404
           :/forbidden|required|identity_mismatch/u.test(code)?403:/transition_invalid|revision_conflict|resource_conflict|idempotency_conflict|request_conflict/u.test(code)?409:400
       return Response.json({error:code},{status})
     }
@@ -316,18 +339,68 @@ export class PortalDemoExchangeClient {
     assertProvisionalSubjectRegistrationReceipt(result)
     return result
   }
+  async submitSubjectEvidence(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant,input:PendingSubjectEvidenceCommand,documents:readonly PendingSubjectEvidenceUploadDocument[]):Promise<PendingSubjectEvidenceReceipt>{
+    const command=normalizePendingSubjectEvidenceCommand(input)
+    if(!Array.isArray(documents)||documents.length<1||documents.length>PendingSubjectEvidencePolicy.maxFiles)throw new TypeError('subject_registration_evidence_documents_invalid')
+    const copies=documents.map(document=>{
+      if(!(document.bytes instanceof Uint8Array)||document.bytes.length<1||document.bytes.length>PendingSubjectEvidencePolicy.maxFileBytes)throw new TypeError('subject_registration_evidence_document_invalid')
+      return {...document,bytes:Uint8Array.from(document.bytes)}
+    })
+    const wire=copies.map(document=>({slot:document.slot,fileName:document.fileName,attachment:buildDidCommInlineBinaryAttachment({id:document.slot,mediaType:document.mediaType,bytes:document.bytes})}))
+    const result=await this.call<PendingSubjectEvidenceReceipt>({operation:'submitSubjectEvidence',scope,participant,command,documents:wire},true)
+    assertPendingSubjectEvidenceReceipt(result)
+    if(result.registrationId!==command.registrationId||result.documents.length!==copies.length||copies.some(document=>!result.documents.some(received=>received.slot===document.slot&&received.fileName===document.fileName&&received.mediaType===document.mediaType&&received.size===document.bytes.length&&received.contentId===buildSha3_384EvidenceContentIdFromDigest(createHash('sha3-384').update(document.bytes).digest()))))throw new TypeError('subject_registration_evidence_receipt_invalid')
+    return result
+  }
+  async readSubjectEvidence(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant,registrationId:string):Promise<PendingSubjectEvidenceReceipt>{
+    const result=await this.call<PendingSubjectEvidenceReceipt>({operation:'readSubjectEvidence',scope,participant,registrationId:registrationIdentifier(registrationId)})
+    assertPendingSubjectEvidenceReceipt(result)
+    if(result.registrationId!==registrationId)throw new TypeError('subject_registration_evidence_receipt_invalid')
+    return result
+  }
   listEvents(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoParticipant):Promise<PortalRtcCallEvent[]> {return this.call({operation:'listEvents',scope,subjectIdentifier,participant})}
   async submitEvent(scope:DemoWorkspaceScope,event:PortalRtcCallEvent,participant:PortalDemoParticipant):Promise<void> {await this.call({operation:'submitEvent',scope,event,participant})}
   care(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoCareParticipant,care:PortalCareOperation):Promise<PortalCareOperationResult>{return this.call({operation:'care',scope,subjectIdentifier,participant,care})}
   careInboxSubjects(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant):Promise<readonly string[]>{return this.call({operation:'careInboxSubjects',scope,participant})}
   catalog(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant,catalog:OrganizationCatalogVaultOperation):Promise<PortalDemoCatalogSnapshot>{return this.call({operation:'catalog',scope,participant,catalog})}
   consent(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoCareParticipant,consent:PortalDemoConsentOperation):Promise<PortalDemoConsentResult>{return this.call({operation:'consent',scope,subjectIdentifier,participant,consent})}
-  private async call<T>(body:object):Promise<T> {
-    const response=await (this.options.fetchImpl??fetch)(this.url,{method:'POST',headers:{authorization:`Bearer ${this.options.bearer}`,'content-type':'application/json'},body:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(15_000)})
+  private async call<T>(body:object,evidenceTransfer=false):Promise<T> {
+    const response=await (this.options.fetchImpl??fetch)(this.url,{method:'POST',headers:{authorization:`Bearer ${this.options.bearer}`,'content-type':'application/json',...(evidenceTransfer?{[EVIDENCE_TRANSFER_HEADER]:'1'}:{})},body:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(evidenceTransfer?60_000:15_000)})
     const payload=await response.json() as {result:T;error?:string}
     if(!response.ok) throw Object.assign(new Error(payload.error||'demo_exchange_failed'),{status:response.status})
     return payload.result
   }
+}
+
+function registrationIdentifier(input:unknown):string{
+ if(typeof input!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(input))throw new TypeError('subject_registration_evidence_identifier_invalid')
+ return input
+}
+async function boundedEvidenceText(request:Request):Promise<string>{
+ const reader=request.body?.getReader(),chunks:Uint8Array[]=[]
+ if(!reader)throw new TypeError('subject_registration_evidence_transfer_invalid')
+ let size=0
+ try{
+  while(true){const next=await reader.read();if(next.done)break;size+=next.value.byteLength;if(size>EVIDENCE_TRANSFER_LIMIT){await reader.cancel();throw new Error('subject_registration_evidence_too_large')}chunks.push(Uint8Array.from(next.value))}
+ }finally{reader.releaseLock()}
+ return Buffer.concat(chunks).toString('utf8')
+}
+function evidenceWireRecord(input:unknown,keys:readonly string[]):Record<string,unknown>{
+ if(!input||typeof input!=='object'||Array.isArray(input))throw new TypeError('subject_registration_evidence_transfer_invalid')
+ const descriptors=Object.getOwnPropertyDescriptors(input),record:Record<string,unknown>=Object.create(null)
+ for(const key of Reflect.ownKeys(descriptors)){if(typeof key!=='string'||!keys.includes(key)||!('value' in descriptors[key]!))throw new TypeError('subject_registration_evidence_transfer_invalid');record[key]=descriptors[key]!.value}
+ return record
+}
+function decodeEvidenceDocuments(input:unknown):PendingSubjectEvidenceUploadDocument[]{
+ if(!Array.isArray(input)||input.length<1||input.length>PendingSubjectEvidencePolicy.maxFiles)throw new TypeError('subject_registration_evidence_documents_invalid')
+ return input.map(value=>{
+  const document=evidenceWireRecord(value,['slot','fileName','attachment']),attachment=evidenceWireRecord(document.attachment,['id','media_type','byte_count','data'])
+  const data=evidenceWireRecord(attachment.data,['base64'])
+  if(typeof document.slot!=='string'||!['subject','controller','relationship'].includes(document.slot)||attachment.id!==document.slot||typeof document.fileName!=='string'||!document.fileName.trim()||document.fileName.length>180||typeof attachment.media_type!=='string'||!PendingSubjectEvidencePolicy.mediaTypes.some(type=>type===attachment.media_type)||typeof attachment.byte_count!=='number'||!Number.isSafeInteger(attachment.byte_count)||attachment.byte_count<1||attachment.byte_count>PendingSubjectEvidencePolicy.maxFileBytes||typeof data.base64!=='string'||data.base64.length>Math.ceil(PendingSubjectEvidencePolicy.maxFileBytes*4/3)+4)throw new TypeError('subject_registration_evidence_document_invalid')
+  const bytes=Buffer.from(data.base64,'base64url')
+  if(bytes.toString('base64url')!==data.base64||bytes.length!==attachment.byte_count)throw new TypeError('subject_registration_evidence_document_invalid')
+  return {slot:document.slot as PendingSubjectEvidenceUploadDocument['slot'],fileName:document.fileName,mediaType:attachment.media_type,bytes:Uint8Array.from(bytes)}
+ })
 }
 
 function collections(scope:DemoWorkspaceScope) {

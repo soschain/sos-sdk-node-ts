@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Stage actual pending identity-document bytes as immutable scoped vault chunks,
+  verify SHA3-384 CIDs by readback and publish metadata only in a small atomic
+  finalization. Resume interrupted uploads without rewriting committed chunks;
+  reject expired creator admission, corruption and rebound subject references.
+- Carry the existing three-file, 10 MiB-per-file policy through a separately
+  bounded authenticated evidence envelope while retaining the ordinary 32 KiB
+  peer limit. Preserve distinct subject, controller and relationship slots and
+  pending-only receipts without issuing a signature or identity verification.
+
 - Read immutable registration creation receipts through the same authenticated
   peer transport, restricted to the admitted creator organization. Later
   controller claim does not invalidate that historical receipt or turn its

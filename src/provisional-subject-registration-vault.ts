@@ -6,7 +6,7 @@ export type TrustedSubjectRegistrationCreator=Readonly<{organizationReference:st
 export type ProvisionalSubjectRegistrationRecord=Readonly<{
  id:string;scopeKey:string;creatorOrganizationReference:string;creatorActorIdentifier:string
  requestKey:string;requestHash:string;command:SubjectRegistrationCommand;receipt:ProvisionalSubjectRegistrationReceipt
- status:'provisional'|'claimed';createdAt:number;expiresAt:number;claimedByOwnerHash?:string
+ status:'provisional'|'claimed';createdAt:number;expiresAt:number;claimedByOwnerHash?:string;pendingEvidenceId?:string
 }>
 export type PendingSubjectControllerInvitation=Readonly<{
  id:string;scopeKey:string;registrationId:string;recipientKind:'email'|'telephone';recipientHash:string
