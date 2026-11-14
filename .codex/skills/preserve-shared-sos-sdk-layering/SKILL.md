@@ -21,11 +21,13 @@ begins only after exact registry packages are installed and verified.
 
 Read [docs/SDK_LAYERING.md](../../../docs/SDK_LAYERING.md).
 
-```text
-gdc-* frozen → sos-data-utils-ts → sos-sdk-core-ts
-                      \                 \
-                       └──────────────→ sos-sdk-node-ts
-```
+`sos-data-utils-ts` consumes independent Antifraud and FHIR contracts.
+`sos-sdk-core-ts` consumes those contracts and owns runtime-neutral orchestration.
+`sos-sdk-node-ts` consumes the shared layers and owns Node adapters.
+No SOS package imports, depends on, wraps or re-exports a `gdc-*` package,
+directly or transitively. Frozen GDC projects may consume these independent
+packages in a future approved migration.
+
 
 - Keep deterministic types and builders in `sos-data-utils-ts`.
 - Keep runtime-neutral authorization and orchestration in `sos-sdk-core-ts`.

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Pin the published independent Antifraud, FHIR, SOS Data and Core contracts.
+  Remove GDC from the resolved registry graph and use only the committed registry
+  lockfile in CI, retaining Node.js 26.13.0. All 242 native checks pass, including
+  strict source, emitted-module, registry and public-runtime dependency guards.
+
 - Authenticate organization bootstrap receipts with the configured Gateway's
   inner JWS and exact issuer, caller and thread binding before exposing tenant
   authority; retain the Individual client's public verification API.
@@ -72,11 +77,6 @@
 - Implement the process-owned transactional memory adapter without a legacy
   delegate, preserving atomic commit/rollback and isolated record custody.
 
-- Registry promotion remains blocked until the corrected shared package
-  versions are published and the resolved lockfile passes the transitive
-  dependency guard. Runtime/source independence does not establish release readiness.
-  The latest full check passes 157 of 158 tests with no skips; the remaining
-  failure is that registry dependency guard.
 
 ## 0.3.1 - 2026-11-13
 

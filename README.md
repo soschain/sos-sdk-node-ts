@@ -33,6 +33,12 @@ Configured gateway communication-key resolution is documented in
 [`docs/REGISTERED_DID_KEYS.md`](docs/REGISTERED_DID_KEYS.md).
 Staff provisioning and recipient installation contracts are documented in
 [`docs/WORKFORCE_CLIENT.md`](docs/WORKFORCE_CLIENT.md).
+Organization bootstrap response authentication and configured signing-key custody
+are documented in
+[`docs/ORGANIZATION_RESPONSE_AUTHENTICATION.md`](docs/ORGANIZATION_RESPONSE_AUTHENTICATION.md).
+The existing purpose-separated profile keys and PIN/host protection are described
+in [`docs/SERVER_PROFILE_CUSTODY_KEYS.md`](docs/SERVER_PROFILE_CUSTODY_KEYS.md)
+and [`docs/SERVER_PROFILE_PROTECTION.md`](docs/SERVER_PROFILE_PROTECTION.md).
 
 ## BFF-owned synthetic Demo exchange
 
