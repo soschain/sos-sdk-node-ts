@@ -1,8 +1,8 @@
 import { createPublicKey, verify } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
 import { buildOrganizationEmployeeDidWeb, normalizeActorContact, type ActorContactInput } from 'antifraud-data-utils-ts/organization-identity'
-import { getHealthcareProfessionalRolesBySector } from 'gdc-common-utils-ts/constants/healthcare'
-import type { DataspaceSector } from 'gdc-common-utils-ts/constants/sectors'
+import { getHealthcareProfessionalRolesBySector } from 'sos-data-utils-ts/healthcare-roles'
+import type { DataspaceSector } from 'sos-data-utils-ts/dataspace-sectors'
 
 export type PortableProfessionalProvider = Readonly<{
   baseUrl: string

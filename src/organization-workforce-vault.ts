@@ -1,6 +1,6 @@
 import {createHash,randomBytes} from 'node:crypto'
-import type {IVaultRepository} from 'gdc-common-utils-ts/storage'
-import type {OrganizationEmployeeLifecycleRecord} from 'gdc-common-utils-ts/models/organization-employee-lifecycle'
+import type {IVaultRepository} from 'sos-sdk-core-ts/vault-repository'
+import type {OrganizationEmployeeLifecycleRecord} from 'sos-data-utils-ts/employee-routing'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 
 export type OrganizationWorkforceSeat=Readonly<{

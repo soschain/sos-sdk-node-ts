@@ -24,6 +24,22 @@ begins only after exact registry packages are installed and verified.
 
 Product-neutral Node adapters for trusted SOSCHAIN runtimes.
 
+Individual registration, verified encrypted responses and recovery of existing
+registered communication keys are documented in
+[`docs/INDIVIDUAL_REGISTRATION.md`](docs/INDIVIDUAL_REGISTRATION.md).
+Host-selected custody adapters are described in
+[`docs/PROFILE_SEALING.md`](docs/PROFILE_SEALING.md).
+Configured gateway communication-key resolution is documented in
+[`docs/REGISTERED_DID_KEYS.md`](docs/REGISTERED_DID_KEYS.md).
+Staff provisioning and recipient installation contracts are documented in
+[`docs/WORKFORCE_CLIENT.md`](docs/WORKFORCE_CLIENT.md).
+Organization bootstrap response authentication and configured signing-key custody
+are documented in
+[`docs/ORGANIZATION_RESPONSE_AUTHENTICATION.md`](docs/ORGANIZATION_RESPONSE_AUTHENTICATION.md).
+The existing purpose-separated profile keys and PIN/host protection are described
+in [`docs/SERVER_PROFILE_CUSTODY_KEYS.md`](docs/SERVER_PROFILE_CUSTODY_KEYS.md)
+and [`docs/SERVER_PROFILE_PROTECTION.md`](docs/SERVER_PROFILE_PROTECTION.md).
+
 ## BFF-owned synthetic Demo exchange
 
 The candidate `sos-sdk-node-ts/portal-care-vault` subpath prepares shared
@@ -75,7 +91,7 @@ The capability-by-capability source decision is recorded in
 [`docs/ORGANIZATION_REGISTRATION_SOURCE_EVALUATION.md`](docs/ORGANIZATION_REGISTRATION_SOURCE_EVALUATION.md).
 
 ```text
-gdc-* frozen
+antifraud-data-utils-ts + fhir-data-utils-ts
     ↓
 sos-data-utils-ts
     ↓
@@ -111,8 +127,8 @@ reuses the same idempotent draft after transient failures, and does not report
 confirmation until the provider write has been followed by authoritative
 readback.
 
-It also does not duplicate the typed clinical Bundle editors exposed by the
-GDC Node SDK. Add a SOS Node adapter only when a real shared channel workflow
+It consumes the SOS data package's batch contracts and the Core-owned
+Communication editors. Add a SOS Node adapter only when a real shared channel workflow
 requires runtime behavior, following the
 [clinical accessor adoption matrix](https://github.com/soschain/sos-data-utils-ts/blob/main/docs/CLINICAL_TYPED_ACCESSOR_ADOPTION.md).
 Portals and assistants without that editor remain on their verified versions.

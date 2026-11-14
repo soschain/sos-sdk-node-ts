@@ -1,0 +1,33 @@
+{
+    "synthetic":  true,
+    "walletKeyDerivationId":  "synthetic-registered-profile",
+    "walletSeed":  "qNuZelXtrZMN8B0_-4jZ4LmZlzgdI4upuCBvB-NhWMg",
+    "context":  {
+                    "profile":  {
+                                    "profileId":  "synthetic-registered-profile"
+                                },
+                    "runtime":  {
+                                    "runtimeId":  "synthetic-registered-profile:server-runtime",
+                                    "runtimeType":  "backend-service"
+                                }
+                },
+    "publicJwks":  [
+                       {
+                           "kty":  "AKP",
+                           "alg":  "ML-DSA-44",
+                           "pub":  "RLUuzmE_-pQwXUdllwBLYyz0a_G0I2UJ1nKmxDpAxgD72kc1xBZmM5gRdcYpfiG8qIENpyTiUmcE9JyodgiqM4hkU9kbcTnJydFbyRt9Ha1lAuXFezgvOt3lQEtw503pM8g7mgjmxaOqo3w-1opH1oqh82Cr7rIjdlG0LwVri4VnWDubsBJB2aQzmlwiGZsHMlgObcX1jKSA4RQ2amyWSRRMKKupiMMD5jBODEMOrciMB77tuWvo8kRkV610TOFqg7QHX9qf_UaX1L2qU7D-_XPauV-4mTnxc3YFAXLAMAClBgD7dX77fsuXAefVYElYLDgcJZofieyX1PM8abN8qSCDZbyJAgmLn-oaJybBfgOSpvVOTn0y-Cwa2eoJh0krn7lfe_HB7Bc4kJAlyAMloCtDhskjK_1ovaMWMa_uZ9EvPxeDKgSf8r5imwik3ezmp-1WJFqkcUnuOFW8g5Amo3qOhy0oLah4caVbXBaxSTwcKLstHSYyMvZm4qtPW-TUXOImeBQal5P5-Is9ZMWoBu3npQLBMrMEv9p2auEUa5Kigl9Fey6KTUigekXKFWXB62KFhRb03pXW4iR_eAK2Ivbtnq-lOkLxVZS9G2gNAqvt9I3Tfdh4X-elfOeTsdsdloNmpgiLgwzQuFyHv_cxRuXFsPavDPIJvAnecxP99n9pcxhN3DkjWEBH_ceVzJ053TJHwYua5qbGk8PceJA5gYaD0v1Ya5f27MCkrynHUbXEyxNyogrMmoAq1t5C7VK9EVqTVSdGye_bFyXxLxhoq-X07w8XKlBuBW4pKFxgAi8nemrcqawZ_3DhTYpvUcIkwWP3cY0Xsdf_panTxBTGrZ4W-Fv2ssYcO2hq8KpNBDq7KKRkGJM1JwKpC72tiTUfx7F2BV1xRNkCjGU_FDVArQeNIatmy225_NuHBMlhNBvowtoboOEUo-w4qSrIEu60EvIr3eqz7_Yj4POc4xye0ZIEnehe7JF2ADCnDuHG7sjUPVFxhkQEboaNONqXGMeEwbMMBgdw_Sf2_nWVV5GEXc_NJCg77bS3HZrpDasnpr6sOhMa4NCZUN9_ACbnVpbBxijthYfRIk6vPCBaONqPnTdFdIS1BvijqsmoTevW7c2obq5pjohioxDb4EaNCpQnACLy6XaMoTJ6_cpl2vetMe9_3prehxKLyuPW3Grh6iJnZnOq--aThsGdN1gBVIk533017jTIvn2_f1_ocwtS7dbhKkwG9431qXuG7ueYYrzuCFh8F2A2-pvjj_yB9akueWmolycdIenZv8LrHpdKJnE0M2Ikg0ZJcm65ZCJhbPsDIC2V0XdDg-V2gM8ZSEnh7VXxkIbavBl15aqbnLxUVopPSJ90BclziPiGHjzePc4ZziGXJ-mvC53CO1220ApCe_us_pgJZRWlyaEoB5XNUhvlEKJfGJ1TzM3_Vty-iH1pojGg6FskEDlTFkaiGJ4zy78MvMb3KKxeLmay6gLi47AE2SJRKI9TSJV3FmOEmBm7sa7Jb0hlfIWBrRltuK7Kpe07u0OfL7BxCQVqLWYdYI8HHNkd0Sqq4ASNHaEJD1mbVGDX2M0umvi_PXdufPFKyevuIkVcmQGWWtbBbFyvewfb8ZkZMwK2M4OXn0yQWl7q5dNvveF4c4oQz7lLdaEQ7DsebkwPISYMn8pxSatGCnmjPDzpjdxj0X01xc-qFc0HT6BFzV0e9y9NtjHuEtsFjJJ_0kCmZsBF7384O-MOIQ",
+                           "kid":  "urn:ietf:params:oauth:jwk-thumbprint:sha-256:x0OQkZOmY2VUGPmgAtcUFIe1tcerw4aiqMJIKfQuknk",
+                           "use":  "sig"
+                       },
+                       {
+                           "kty":  "OKP",
+                           "crv":  "ML-KEM-768",
+                           "x":  "VKekV_I7kcIErgFeTtxHRnFuHeQ9gVJzU-wlbvlEm8G-FtCFcAJpYkGlSDZ5mqJxKkW68ESHjxoLEUp_xOlN3gMz2DGhFfuwOCYOnDtkNAEjzlAR-Ocep6K2Gjld2jENgZG5q_stDzlikIViqDOO5-BCJ-lJYCgsj_CZVza-zWkWSPYsmnV1QNmSpQuMGAMH8qyWSwN4nMg6qpsoqhwcafSYlOgtMzevrZwbSrdjfkVy0fjMoAWVO9E9TorKKPy_ulxL-wiNzvs5OeHOhbuKfnmd_rvCopxueUJoeGODO8o2M4CsreVn1Jy-o9AvW2l83iFVTAqdBhQ_aXHB0-QfiaMZMoVzN8CjPYLBgQyJYnd3NbNf19ewbVa9suk_alw-yERF3rGMbQM2OjdB_nlIicmntXCJjklvncyCeFO-Q8Yxm8xCvAkk6cHBcJIcAvir_rtQ78IBdwQdxZWA4BNx61VZyHt4r4Kh_FtyuNFJ2ZZyd3lfTXFxtNxmj0K8zVQ1sPF3KnwQuyGCVCrD7qafEcVyWwqgSzYHvfRk7YPH0ul5VMdlzgUOgMtPlYVhAco2hQTMMJU9qnggAyQagQY3edJze7s-xmZF6OSG16Fwo3ZS1kaHaxceNANJxNxIIAfIrog8Uougp2uQW3xS49KST5Q7YJFFmUGubUA4r-l4gttegBZiiyNky5uxOWsCJyFlY0NharxFeEOj3xB7LMYjUKnG_erFyvMybgnMGTXICvBByaa-mamqE-wd0ATQyfpN4HmTC6xJi3mEy8Oh6QYWOWnILqdZGhwrV8spI6Uymdk1yQxKgfkUZ8CQd6JvzoE8P6SOhXS0qlgjxgSCjGBrx8lZYqex9lIUWANQX0NdyVnDK9NcPDySLdBNHFxfFEMNPfouZ_qB09ddnPK8nDS-sCF35Is59MrCD3iSRKW-qGg_06icsWRB7nlpZvBhj9xXJktnoWANoZm5qAwko-VlE3F8FsCXvMxwpvw8Q-UFW3nCOQVh8ldpYXWHeCWkuitm4vdPxQOTZYOAFsCisUd5icFdulKOT5W7KZUzhAQ4qfopjvZeQtSmgLPF8AE87JtMkwQaDqU7fqplkOayuACcQvBB40uvsQMbKOOp7lcbFYA9EqEyu0Kc95BZCZGAfWKvZIszvak6NwN69qgMNhXE7sV7VFdmxpwXl7kW6RxevKOHSQlNkcUU-uqAhILJuCpF77QXNYpGAKFLMEEWuyiFdZA4flA8kZO3YJc5n0YcKOw2sNa4Fmc-NpzM2FAVqDZzmTkBmhWxZZa7PDCZZeV-1JVg4xeaQqUEzeV4nCkIZjzNXutuPodNuDE-GcxXb0aGcshTQRXD9-aK5lcvU0iSNchGstNTfYaw6htTzFEExlCtprVjAPTNozV-OvWSm4hw_CZPIcZg7FNKGypOeQIvLqKfa7ClcXJRffIGhmBjy8sMC1Sa84glbBG45QIKnuNIbNB2PwCxDEVuwhAvZWzJ9ZC1LvhuQsaUPuNtAOmK48g-OZIhy5eo2EuXXQolc2Uz2DVSDZpX4I-fquIA_AEEuaiceMO9blDWiUYzB1Wb_hA",
+                           "kid":  "kBAXKgMgrChfBrak2kCWv4FUtJNBzOu86IIWBnONEyk"
+                       }
+                   ],
+    "compatibilityOracle":  {
+                                "sha256":  "9e3a15b72e011c199b1fa97b698c293604ebda188f269351d679ccdf8f8a0fb2",
+                                "moduleName":  "node-managed-wallet.js"
+                            }
+}

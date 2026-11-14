@@ -1,9 +1,9 @@
 // Flow contract: a BFF supplies one verified contact; published employee DIDs bind that contact while an employee UUID authorization URN remains pre-DCR routing evidence, never a licence, profile, verified contact binding or device grant.
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildStableActorIdentifier, buildPortalActorDidWeb } from 'gdc-common-utils-ts/utils/actor-identifier'
-import { HealthcareActorRoles } from 'gdc-common-utils-ts/constants/healthcare'
-import { buildOrganizationAuthorizationUrnCds, buildOrganizationEmployeeAuthorizationUrnCds } from 'gdc-common-utils-ts/utils/organization-authorization-urn'
+import { buildOrganizationEmployeeDidWeb, buildStableActorIdentifier } from 'antifraud-data-utils-ts/organization-identity'
+import { HealthcareActorRoles } from 'sos-data-utils-ts/healthcare-roles'
+import { buildOrganizationAuthorizationUrnCds, buildOrganizationEmployeeAuthorizationUrnCds } from 'sos-data-utils-ts/organization-authorization-urn'
 import { REPOSITORY_SAFE_EXAMPLES } from 'sos-data-utils-ts/repository-privacy'
 import { resolvePortableProfessionalEnrollment, resolvePortableProfessionalOrganizationEnrollments } from '../dist/portable-professional-evidence.js'
 
@@ -19,9 +19,8 @@ const fixture = Object.freeze({
 })
 
 function identity(contactKind, contact, role = fixture.role, employeeUuid = fixture.employeeUuid) {
-  const actorIdentifier = buildStableActorIdentifier({ contactKind, contact })
   return {
-    professionalDid: buildPortalActorDidWeb({ portalDidWeb: fixture.providerDid, actorIdentifier, role }),
+    professionalDid: buildOrganizationEmployeeDidWeb({ organizationDidWeb: fixture.providerDid, contactKind, contact, role }),
     // The authorization member is the 16-byte employee UUID encoded as base58;
     // the operational employee DID uses the separate SHA3-256 contact hash.
     authorizationUrn: buildOrganizationEmployeeAuthorizationUrnCds({

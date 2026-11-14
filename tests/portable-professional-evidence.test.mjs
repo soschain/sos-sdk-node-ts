@@ -3,12 +3,10 @@ import assert from 'node:assert/strict'
 import { generateKeyPairSync, sign } from 'node:crypto'
 import { deflateRawSync } from 'node:zlib'
 import test from 'node:test'
-import { buildProfessionalDidWeb } from 'gdc-common-utils-ts/utils/did'
-import { buildStableActorIdentifier } from 'gdc-common-utils-ts/utils/actor-identifier'
-import { buildOrganizationAuthorizationUrnCds, buildOrganizationEmployeeAuthorizationUrnCds } from 'gdc-common-utils-ts/utils/organization-authorization-urn'
+import { buildOrganizationEmployeeDidWeb, buildStableActorIdentifier } from 'antifraud-data-utils-ts/organization-identity'
+import { buildOrganizationAuthorizationUrnCds, buildOrganizationEmployeeAuthorizationUrnCds } from 'sos-data-utils-ts/organization-authorization-urn'
 import { REPOSITORY_SAFE_EXAMPLES } from 'sos-data-utils-ts/repository-privacy'
-import { HealthcareActorRoles } from 'gdc-common-utils-ts/constants/healthcare'
-import { EXAMPLE_SECONDARY_EU_COUNTRY } from 'gdc-common-utils-ts/examples'
+import { HealthcareActorRoles } from 'sos-data-utils-ts/healthcare-roles'
 import {
   derivePortableProfessionalProviderCandidates,
   resolvePortableProfessionalOrganizationEnrollments,
@@ -81,9 +79,9 @@ test('resolves one existing authorization URN through the authoritative tenant D
 test('discovers existing professional roles from organization jurisdiction, legal identifier, sector and verified email', async () => {
   const requested = []
   const verifiedEmail = verifiedProfessionalEmail
-  const veterinarianDid = buildProfessionalDidWeb({
+  const veterinarianDid = buildOrganizationEmployeeDidWeb({
     organizationDidWeb: providerDid,
-    email: verifiedEmail,
+    contactKind:'email', contact: verifiedEmail,
     role: HealthcareActorRoles.Veterinarian,
   })
   const results = await resolvePortableProfessionalOrganizationEnrollments({
@@ -116,7 +114,7 @@ test('discovers existing professional roles from organization jurisdiction, lega
 
 test('rejects a regional jurisdiction that does not belong to the selected country', async () => {
   await assert.rejects(resolvePortableProfessionalOrganizationEnrollments({
-    country: EXAMPLE_SECONDARY_EU_COUNTRY,
+    country: REPOSITORY_SAFE_EXAMPLES.secondaryCountryIso2,
     region: provider.jurisdiction,
     organizationIdentifier: provider.tenantId,
     sector: provider.sector,
@@ -126,7 +124,7 @@ test('rejects a regional jurisdiction that does not belong to the selected count
 })
 
 test('resolves a professional DID only through its authoritative DID document', async () => {
-  const professionalDid = buildProfessionalDidWeb({ organizationDidWeb: providerDid, email: verifiedProfessionalEmail, role: HealthcareActorRoles.Veterinarian })
+  const professionalDid = buildOrganizationEmployeeDidWeb({ organizationDidWeb: providerDid, contactKind:'email', contact: verifiedProfessionalEmail, role: HealthcareActorRoles.Veterinarian })
   const requested = []
   const result = await resolvePortableProfessionalEnrollment({
     professionalIdentifier: professionalDid,
@@ -158,7 +156,7 @@ test('verifies a signed professional SHC before extracting its existing authoriz
       resourceType: 'Bundle',
       entry: [
         { resource: { resourceType: 'Organization', identifier: [{ value: 'Example-123' }] } },
-        { resource: { resourceType: 'Practitioner', identifier: [{ value: buildProfessionalDidWeb({ organizationDidWeb: providerDid, email: verifiedProfessionalEmail, role: HealthcareActorRoles.Veterinarian }) }] } },
+        { resource: { resourceType: 'Practitioner', identifier: [{ value: buildOrganizationEmployeeDidWeb({ organizationDidWeb: providerDid, contactKind:'email', contact: verifiedProfessionalEmail, role: HealthcareActorRoles.Veterinarian }) }] } },
         { resource: { resourceType: 'PractitionerRole', active: true, identifier: [{ value: authorizationUrn }], practitioner: { reference: 'resource:1' }, organization: { reference: 'resource:0' } } },
       ],
     } } },

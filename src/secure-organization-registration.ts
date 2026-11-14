@@ -1,11 +1,14 @@
 // Copyright 2026 Connecting Solution & Applications Ltd under the Apache License, Version 2.0.
 import {
-  NodeHttpClient, NodeManagedWallet, TransportProfiles, resolveDidWebKeyAgreementJwk,
+  OrganizationRegistrationClient, TransportProfiles,
   type AppInfo, type HostRouteContext, type LegalOrganizationOrderInput,
   type NodeLegalOrganizationVerificationTransactionInput, type PollOptions,
   type RouteContext, type SubmitAndPollResult,
-} from 'gdc-sdk-node-ts'
-import { buildAuthorityDidWeb } from 'gdc-common-utils-ts/utils/authority-resolution'
+} from './organization-registration-client.js'
+import {createVerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
+import type {PublicJwk as SigningPublicJwk} from 'antifraud-data-utils-ts/cryptography'
+import {OrganizationRegistrationWallet} from './organization-registration-wallet.js'
+import {buildAuthorityDidWeb,resolveDidWebKeyAgreementJwk} from './did-web-recipient.js'
 
 type PublicJwk = Readonly<Record<string, unknown>>
 export type HostScopedDidWebResolverOptions = Readonly<{
@@ -36,6 +39,7 @@ export type SecureOrganizationRegistrationRuntimeOptions = Readonly<{
   gatewayBaseUrl: string
   appInfo?: AppInfo
   resolveRecipientJwk(recipientDid: string): Promise<PublicJwk>
+  resolveGatewaySigningJwk(gatewayDid: string): Promise<SigningPublicJwk>
   fetchImpl?: typeof fetch
   requestTimeoutMs?: number
 }>
@@ -82,23 +86,27 @@ export class SecureOrganizationRegistrationRuntime {
     ))
   }
 
-  private async createEncryptedClient(input: SecureOrganizationBootstrapInput): Promise<NodeHttpClient> {
+  private async createEncryptedClient(input: SecureOrganizationBootstrapInput): Promise<OrganizationRegistrationClient> {
     const walletKeyDerivationId = required(input.walletKeyDerivationId, 'organization_registration_wallet_context_required')
     const walletSeed = required(input.walletSeed, 'organization_registration_wallet_seed_required')
     const providerDid = required(input.providerDid, 'organization_registration_provider_did_required')
     const bearerToken = required(input.bearerToken, 'organization_registration_bearer_required')
-    const wallet = new NodeManagedWallet({ resolveRecipientJwk: this.options.resolveRecipientJwk })
+    const wallet = new OrganizationRegistrationWallet({ resolveRecipientJwk: this.options.resolveRecipientJwk })
     const context = buildOrganizationRegistrationWalletContext(walletKeyDerivationId)
-    await wallet.provisionManagedKeys(context, { ownerScope: 'profile', purposes: ['actor-signing', 'document-at-rest'], mode: 'deterministic', seedMaterial: walletSeed })
-    await wallet.provisionManagedKeys(context, { ownerScope: 'runtime', purposes: ['openid-id-token-signing', 'vp-token-signing', 'comm-signing', 'comm-encryption'], mode: 'deterministic', seedMaterial: walletSeed })
-    return new NodeHttpClient({
+    await wallet.provisionCommunicationKeys(context,walletSeed)
+    const adapter=createVerifiedGatewaySecureAdapter({
+      gatewayDid:required(input.hostContext.hostDid,'organization_registration_gateway_identity_required'),
+      pack:message=>wallet.packForRecipientWithContext(message,providerDid,{context}),
+      decrypt:packed=>wallet.unpackWithContext(packed,{context}),
+      resolveGatewaySigningJwk:this.options.resolveGatewaySigningJwk,
+      errorPrefix:'organization_registration',
+    })
+    return new OrganizationRegistrationClient({
       baseUrl: this.options.gatewayBaseUrl, bearerToken, ctx: input.routeContext,
       appInfo: this.options.appInfo, fetchImpl: this.options.fetchImpl, requestTimeoutMs: this.options.requestTimeoutMs,
       transportProfile: TransportProfiles.DidcommEncryptedForm,
-      secureTransportAdapter: {
-        pack: message => wallet.packForRecipientWithContext(message, providerDid, { context }),
-        unpack: async jwe => (await wallet.unpackWithContext(jwe, { context })).content,
-      },
+      expectedResponseIssuer:input.hostContext.hostDid,
+      secureTransportAdapter: {pack:adapter.pack,unpack:adapter.unpackVerified},
     })
   }
 }

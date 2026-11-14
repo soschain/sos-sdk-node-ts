@@ -1,6 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto'
-import type {ServerProfileSealer} from 'gdc-sdk-node-ts'
-import type {IVaultRepository} from 'gdc-common-utils-ts/storage'
+import type {ServerProfileSealer} from 'sos-sdk-core-ts/profile-sealer'
+import type {IVaultRepository} from 'sos-sdk-core-ts/vault-repository'
 import {normalizePortalPushNotice,normalizePortalPushSubscription,type PortalPushNotice,type PortalPushSubscription} from 'sos-data-utils-ts/portal-push'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 

@@ -1,5 +1,5 @@
 import { buildStableActorIdentifier, type ActorContactInput } from 'antifraud-data-utils-ts/organization-identity'
-import { EmployeeActivationGrantVersions, type EmployeeActivationGrant } from 'gdc-common-utils-ts'
+import { EmployeeActivationGrantVersions, type EmployeeActivationGrant } from 'sos-data-utils-ts/employee-routing'
 
 export type EmployeeActivationGrantInput = ActorContactInput & Readonly<
   Pick<EmployeeActivationGrant, 'employeeDid' | 'employeeRoleCode' | 'providerDid' | 'routeContext'> & {

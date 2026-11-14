@@ -1,10 +1,9 @@
 // Flow contract: the active SOS factory retains the existing V1 routing-grant shape and opaque actor identity for one explicit phone/email contact; the owning BFF still proves contact possession, owner binding, expiry and GW activation.
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { EmployeeActivationGrantVersions } from 'gdc-common-utils-ts'
-import { HealthcareActorRoles } from 'gdc-common-utils-ts/constants/healthcare'
-import { buildStableActorIdentifier as legacyActorIdentifier } from 'gdc-common-utils-ts/utils/actor-identifier'
-import { createEmployeeActivationGrant as legacyEmailGrant, employeeActivationGrantMatchesEmail } from 'gdc-sdk-node-ts'
+import { EmployeeActivationGrantVersions } from 'sos-data-utils-ts/employee-routing'
+import { HealthcareActorRoles } from 'sos-data-utils-ts/healthcare-roles'
+import { buildStableActorIdentifier as expectedActorIdentifier } from 'antifraud-data-utils-ts/organization-identity'
 import { REPOSITORY_SAFE_EXAMPLES as safe } from 'sos-data-utils-ts/repository-privacy'
 import { createEmployeeActivationGrant, employeeActivationGrantMatchesContact } from '../dist/index.js'
 
@@ -17,7 +16,7 @@ const email={contactKind:'email',contact:safe.individualEmail}
 test('phone factory emits exactly the existing V1 model with no clear-contact or new wire fields',()=>{
   const grant=createEmployeeActivationGrant({...routing,...phone})
   assert.deepEqual(grant,{version:EmployeeActivationGrantVersions.V1,employeeDid:routing.employeeDid,employeeRoleCode:routing.employeeRoleCode,
-    employeeActorIdentifier:legacyActorIdentifier(phone),providerDid:routing.providerDid,routeContext:routing.routeContext,
+    employeeActorIdentifier:expectedActorIdentifier(phone),providerDid:routing.providerDid,routeContext:routing.routeContext,
     createdAt:routing.createdAt.toISOString(),expiresAt:routing.expiresAt.toISOString()})
   assert.equal(Object.hasOwn(grant,'contact'),false);assert.equal(Object.hasOwn(grant,'email'),false);assert.equal(Object.hasOwn(grant,'phone'),false)
   assert.equal(JSON.stringify(grant).includes(safe.phoneE164),false)
@@ -32,11 +31,11 @@ test('normalizes explicitly selected telephone formats and rejects another conta
 })
 
 for(const [index,selected] of [safe.individualEmail,` ${safe.individualEmail.toUpperCase()} `,`mailto:${safe.individualEmail}`].entries()){
-  test(`retains the frozen email factory and matcher wire contract for normalized variant ${index+1}`,()=>{
+  test(`preserves the V1 email wire contract for normalized variant ${index+1}`,()=>{
     const grant=createEmployeeActivationGrant({...routing,contactKind:'email',contact:selected})
-    const previous=legacyEmailGrant({...routing,email:selected})
-    assert.deepEqual(grant,previous)
-    assert.equal(employeeActivationGrantMatchesContact(grant,email),employeeActivationGrantMatchesEmail(previous,safe.individualEmail))
+    const expected={version:EmployeeActivationGrantVersions.V1,employeeDid:routing.employeeDid,employeeRoleCode:routing.employeeRoleCode,employeeActorIdentifier:expectedActorIdentifier(email),providerDid:routing.providerDid,routeContext:routing.routeContext,createdAt:routing.createdAt.toISOString(),expiresAt:routing.expiresAt.toISOString()}
+    assert.deepEqual(grant,expected)
+    assert.equal(employeeActivationGrantMatchesContact(grant,email),true)
     assert.equal(employeeActivationGrantMatchesContact(grant,{contactKind:'email',contact:safe.firstContactEmail}),false)
   })
 }
@@ -44,13 +43,13 @@ for(const [index,selected] of [safe.individualEmail,` ${safe.individualEmail.toU
 for(const selected of [{contactKind:'phone',contact:'12345'},{contactKind:'email',contact:'invalid'},{contactKind:'sms',contact:safe.phoneE164},{contactKind:'phone',contact:''}]){
   test(`denies malformed explicit ${selected.contactKind} input without fallback`,()=>{
     assert.throws(()=>createEmployeeActivationGrant({...routing,...selected,email:safe.individualEmail}),TypeError)
-    assert.throws(()=>employeeActivationGrantMatchesContact({employeeActorIdentifier:legacyActorIdentifier(phone)},selected),TypeError)
+    assert.throws(()=>employeeActivationGrantMatchesContact({employeeActorIdentifier:expectedActorIdentifier(phone)},selected),TypeError)
   })
 }
 
 test('does not infer the selected contact from a legacy email-only argument',()=>{
   assert.throws(()=>createEmployeeActivationGrant({...routing,email:safe.individualEmail}),TypeError)
-  assert.throws(()=>employeeActivationGrantMatchesContact({employeeActorIdentifier:legacyActorIdentifier(email)},{email:safe.individualEmail}),TypeError)
+  assert.throws(()=>employeeActivationGrantMatchesContact({employeeActorIdentifier:expectedActorIdentifier(email)},{email:safe.individualEmail}),TypeError)
 })
 
 test('preserves caller-owned routing and dates without mutating contact input',()=>{

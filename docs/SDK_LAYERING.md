@@ -2,7 +2,8 @@
 
 ```mermaid
 flowchart TB
-  GDC["gdc-* frozen"] --> DATA["sos-data-utils-ts<br/>deterministic contracts"]
+  AF["antifraud-data-utils-ts"] --> DATA["sos-data-utils-ts<br/>deterministic contracts"]
+  FHIR["fhir-data-utils-ts"] --> DATA
   DATA --> CORE["sos-sdk-core-ts<br/>runtime-neutral authorization"]
   DATA --> NODE["sos-sdk-node-ts<br/>product-neutral Node adapters"]
   CORE --> NODE

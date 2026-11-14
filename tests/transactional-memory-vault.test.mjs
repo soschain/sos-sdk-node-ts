@@ -1,7 +1,24 @@
 // Flow contract: the shared memory vault serializes transactions, commits atomically, rolls back failures and preserves the existing vault interface for every channel.
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { TransactionalMemoryVaultRepository } from '../dist/index.js'
+import {spawnSync} from 'node:child_process'
+import { TransactionalMemoryVaultRepository } from '../dist/transactional-vault.js'
+
+test('loads and executes the SOS memory vault with every GDC module forbidden',()=>{
+  const target=new URL('../dist/transactional-vault.js',import.meta.url).href
+  const result=spawnSync(process.execPath,['--input-type=module','-e',`
+    import {registerHooks} from 'node:module';
+    registerHooks({resolve(specifier,context,nextResolve){
+      if(specifier.startsWith('gdc-'))throw new Error('forbidden_legacy_dependency');
+      return nextResolve(specifier,context);
+    }});
+    const {TransactionalMemoryVaultRepository}=await import(${JSON.stringify(target)});
+    const vault=new TransactionalMemoryVaultRepository();
+    await vault.put('records',{id:'isolated',value:1});
+    if((await vault.get('records','isolated'))?.value!==1)throw new Error('vault_readback_failed');
+  `],{encoding:'utf8'})
+  assert.equal(result.status,0,result.stderr)
+})
 
 test('commits one competing claim and rolls back every write on failure', async () => {
   const vault = new TransactionalMemoryVaultRepository()
@@ -34,4 +51,23 @@ test('does not expose mutable references outside an atomic transaction', async (
   const readback = await vault.get('records', 'one')
   readback.nested.counter = 3
   assert.equal((await vault.get('records', 'one')).nested.counter, 1)
+})
+
+test('filters, orders and paginates isolated records and deletes exact identifiers', async () => {
+  const vault = new TransactionalMemoryVaultRepository()
+  await vault.put('records', [
+    {id:'a',status:'ready',rank:3},
+    {id:'b',status:'ready',rank:1},
+    {id:'c',status:'closed',rank:2},
+  ])
+  const result = await vault.query('records', {
+    where:[{attribute:'status',in:['ready']}],
+    orderBy:{attribute:'rank',direction:'asc'},offset:1,limit:1,
+  })
+  assert.deepEqual(result.map(record=>record.id),['a'])
+  result[0].rank=99
+  assert.equal((await vault.get('records','a')).rank,3)
+  assert.equal(await vault.delete('records','a'),true)
+  assert.equal(await vault.delete('records','a'),false)
+  assert.deepEqual(await vault.query('missing',{}),[])
 })

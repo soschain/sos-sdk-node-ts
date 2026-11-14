@@ -2,6 +2,82 @@
 
 ## Unreleased
 
+- Pin the published independent Antifraud, FHIR, SOS Data and Core contracts.
+  Remove GDC from the resolved registry graph and use only the committed registry
+  lockfile in CI, retaining Node.js 26.13.0. All 242 native checks pass, including
+  strict source, emitted-module, registry and public-runtime dependency guards.
+
+- Authenticate organization bootstrap receipts with the configured Gateway's
+  inner JWS and exact issuer, caller and thread binding before exposing tenant
+  authority; retain the Individual client's public verification API.
+- Preserve all five existing workforce DCR key purposes through the six-key
+  custody projection, keeping document storage material separate and rejecting
+  contradictory public-key algorithm/use descriptors.
+
+- Recover the existing six purpose-separated profile/runtime public keys from
+  unlocked custody, retain all five DCR keys and keep the document key separate.
+  Bind registered material exactly and expose distinct actor and VP ES384
+  signing with explicit client binding, without rotating keys or issuing roles.
+
+- Protect and open persisted server-profile secrets through the SOS-owned
+  envelope contract, PIN-derived scrypt key and independent host sealer. Retain
+  existing ciphertext and purpose-specific AAD without replacing wallet seeds;
+  reject malformed parameters and distinguish PIN rejection from host failure.
+
+- Add contact-generic staff provisioning and recipient Token/DCR transport over
+  shared registered submit/poll handling. Bind employee and seat receipts to the
+  selected contact, role and actual resource UUID; keep commercial seat Orders
+  explicit. Keep configured signature trust separate from each manager's
+  expected response issuer, and preserve existing individual-registration rules.
+  Distinguish registered administration from explicit pre-DCR key-possession
+  bootstrap, retain the governed actor-signing public key and permit local HTTP
+  callback URIs only through a host-selected loopback option.
+- Resolve configured did:web communication keys through their exact local DID
+  relationships, with bounded transport and rejection of foreign identities,
+  redirects, private material and ambiguous methods.
+
+- Provide host-selected AES-GCM and Google KMS profile sealers over the existing
+  Core port. Preserve existing ciphertext envelopes and AAD without choosing a
+  runtime mode, replacing a custody key or rotating stored wallet seeds.
+
+- Submit individual registration and recipient Order confirmation through owned
+  bootstrap or registered signed/encrypted transport. Bind actual gateway
+  identities, Offers, response signatures and separate controller assignments.
+- Recover the exact registered communication pair from an unlocked profile,
+  rejecting mismatched derivation context or public material without rotating keys.
+
+- Stage actual pending identity-document bytes as immutable scoped vault chunks,
+  verify SHA3-384 CIDs by readback and publish metadata only in a small atomic
+  finalization. Resume interrupted uploads without rewriting committed chunks;
+  reject expired creator admission, corruption and rebound subject references.
+- Carry the existing three-file, 10 MiB-per-file policy through a separately
+  bounded authenticated evidence envelope while retaining the ordinary 32 KiB
+  peer limit. Preserve distinct subject, controller and relationship slots and
+  pending-only receipts without issuing a signature or identity verification.
+
+- Read immutable registration creation receipts through the same authenticated
+  peer transport, restricted to the admitted creator organization. Later
+  controller claim does not invalidate that historical receipt or turn its
+  pending-at-creation fields into live ownership status.
+
+- Persist provisional subject registrations and pending responsible-party
+  invitations atomically through the existing transactional vault. Retain exact
+  request replay after later claim; reject changed requests and other creator
+  organizations without registering an owned or discoverable card.
+- Extend the authenticated portal peer transport with an injected registration
+  provider and preserve its explicit conflict and admission errors.
+
+- Replace direct imports from <https://github.com/Global-DataCare/gdc-common-utils-ts>
+  with SOS storage, workforce, Consent and Communication contracts plus FHIR and
+  Antifraud utilities.
+- Own encrypted organization verification, reissuance and Order submit/poll.
+  Reconstruct the exact existing communication keys and key identifiers using
+  independent cryptography; reject plaintext terminal responses and rejected
+  submits without polling. Real loopback HTTP and cryptography checks pass.
+- Implement the process-owned transactional memory adapter without a legacy
+  delegate, preserving atomic commit/rollback and isolated record custody.
+
+
 ## 0.3.1 - 2026-11-13
 
 - Pin Common Utilities 2.9.31 and SOS Data 0.6.35, retaining the runtime and declaration bytes from the cumulative local proof.

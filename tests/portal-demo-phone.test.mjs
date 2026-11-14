@@ -11,10 +11,11 @@ import {TransactionalMemoryVaultRepository} from '../dist/transactional-vault.js
 import {buildDemoWorkspaceScope} from 'sos-data-utils-ts/demo-workspace-scope'
 import {REPOSITORY_SAFE_EXAMPLES as examples} from 'sos-data-utils-ts/repository-privacy'
 import {SOSCHAIN_PERSONAL_DEMO_HOUSEHOLD} from 'sos-data-utils-ts/portal-demo-fixtures'
-import {ClaimConsent as C,ConsentStatuses} from 'gdc-common-utils-ts/models/consent-rule'
-import {buildConsentClaimsSimple,normalizeConsentTarget} from 'gdc-common-utils-ts/utils/consent'
-import {HealthcareActorRoles,HealthcareConsentPurposes} from 'gdc-common-utils-ts/constants/healthcare'
-import {IndividualLogicalSections} from 'gdc-common-utils-ts/constants/individual-sections'
+import {ClaimConsent as C,ConsentStatuses} from 'fhir-data-utils-ts'
+import {buildConsentClaimsSimple,normalizeConsentTarget} from 'sos-data-utils-ts/consent-coverage'
+import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
+import {HealthcareConsentPurposes} from 'fhir-data-utils-ts'
+import {IndividualLogicalSections} from 'sos-data-utils-ts/individual-sections'
 
 const section=IndividualLogicalSections.Encounters.attributeValue
 const role=HealthcareActorRoles.MedicalDoctors
