@@ -29,6 +29,8 @@ registered communication keys are documented in
 [`docs/INDIVIDUAL_REGISTRATION.md`](docs/INDIVIDUAL_REGISTRATION.md).
 Host-selected custody adapters are described in
 [`docs/PROFILE_SEALING.md`](docs/PROFILE_SEALING.md).
+Configured gateway communication-key resolution is documented in
+[`docs/REGISTERED_DID_KEYS.md`](docs/REGISTERED_DID_KEYS.md).
 
 ## BFF-owned synthetic Demo exchange
 

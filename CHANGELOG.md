@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Resolve configured did:web communication keys through their exact local DID
+  relationships, with bounded transport and rejection of foreign identities,
+  redirects, private material and ambiguous methods.
+
 - Provide host-selected AES-GCM and Google KMS profile sealers over the existing
   Core port. Preserve existing ciphertext envelopes and AAD without choosing a
   runtime mode, replacing a custody key or rotating stored wallet seeds.
