@@ -41,10 +41,17 @@ export class OrganizationRegistrationWallet {
     return structuredClone({signing:keys.signing,encryption:keys.encryption})
   }
   async packForRecipientWithContext(content:object,recipientDid:string,options:Readonly<{context:RegistrationWalletContext}>):Promise<string>{
-    const keys=this.requireKeys(options.context)
+    return this.pack(content,recipientDid,options.context,false)
+  }
+  /** Explicit pre-DCR possession proof; the gateway still verifies account, activation and assignment authority. */
+  async packBootstrapForRecipientWithContext(content:object,recipientDid:string,options:Readonly<{context:RegistrationWalletContext}>):Promise<string>{
+    return this.pack(content,recipientDid,options.context,true)
+  }
+  private async pack(content:object,recipientDid:string,context:RegistrationWalletContext,bootstrap:boolean):Promise<string>{
+    const keys=this.requireKeys(context)
     const recipient=await this.options.resolveRecipientJwk?.(recipientDid)
     if(!recipient||recipient.kty!=='OKP'||!['ML-KEM-512','ML-KEM-768','ML-KEM-1024'].includes(String(recipient.crv))||typeof recipient.x!=='string'||'d' in recipient||'dBytes' in recipient)throw new Error('registration_recipient_encryption_key_invalid')
-    const jws=await this.cryptography.signDataJws(content,{alg:'ML-DSA-44',kid:keys.signing.kid,typ:'JWS'},keys.signingSecret)
+    const jws=await this.cryptography.signDataJws(content,{alg:'ML-DSA-44',kid:keys.signing.kid,typ:'JWS',...(bootstrap?{jwk:keys.signing}:{})},keys.signingSecret)
     const compact=`${jws.protected}.${jws.payload}.${jws.signature}`
     return this.cryptography.encryptJweToCompact(compact,{enc:'A256GCM',skid:keys.encryption.kid,cty:'JWS'},{...keys.encryption,dBytes:keys.encryptionSecret},recipient as unknown as MlkemPublicJwk)
   }

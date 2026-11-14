@@ -31,6 +31,8 @@ Host-selected custody adapters are described in
 [`docs/PROFILE_SEALING.md`](docs/PROFILE_SEALING.md).
 Configured gateway communication-key resolution is documented in
 [`docs/REGISTERED_DID_KEYS.md`](docs/REGISTERED_DID_KEYS.md).
+Staff provisioning and recipient installation contracts are documented in
+[`docs/WORKFORCE_CLIENT.md`](docs/WORKFORCE_CLIENT.md).
 
 ## BFF-owned synthetic Demo exchange
 

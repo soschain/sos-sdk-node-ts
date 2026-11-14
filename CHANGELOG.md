@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add contact-generic staff provisioning and recipient Token/DCR transport over
+  shared registered submit/poll handling. Bind employee and seat receipts to the
+  selected contact, role and actual resource UUID; keep commercial seat Orders
+  explicit. Keep configured signature trust separate from each manager's
+  expected response issuer, and preserve existing individual-registration rules.
+  Distinguish registered administration from explicit pre-DCR key-possession
+  bootstrap, retain the governed actor-signing public key and permit local HTTP
+  callback URIs only through a host-selected loopback option.
 - Resolve configured did:web communication keys through their exact local DID
   relationships, with bounded transport and rejection of foreign identities,
   redirects, private material and ambiguous methods.

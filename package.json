@@ -12,6 +12,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./organization-registration-wallet": {
+      "types": "./dist/organization-registration-wallet.d.ts",
+      "default": "./dist/organization-registration-wallet.js"
+    },
+    "./workforce-client": {
+      "types": "./dist/workforce-client.d.ts",
+      "default": "./dist/workforce-client.js"
+    },
     "./registered-did-keys": {
       "types": "./dist/registered-did-keys.d.ts",
       "default": "./dist/registered-did-keys.js"

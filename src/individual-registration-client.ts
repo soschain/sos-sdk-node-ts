@@ -1,5 +1,5 @@
 import {createHash,randomBytes,randomUUID} from 'node:crypto'
-import {buildGatewayApplicationHeaders} from 'sos-data-utils-ts/gateway-application-identity'
+import {RegisteredGatewayTransport,type VerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
 import type {AppInfo,PollOptions,RouteContext,SubmitAndPollResult} from 'sos-data-utils-ts/gateway-transport-contract'
 import {HL7_CODING_SYSTEM_V3_ROLE_CODE} from 'fhir-data-utils-ts'
 import {HealthcareActorRoleCodes} from 'sos-data-utils-ts/healthcare-roles'
@@ -11,7 +11,7 @@ type BaseOptions=Readonly<{
  baseUrl:string;bearerToken:string;ctx:RouteContext;issuerDid:string;recipientDid:string
  appInfo?:AppInfo;requestTimeoutMs?:number;fetchImpl?:typeof fetch
 }>
-type VerifiedSecureAdapter=Readonly<{gatewayDid:string;pack:(message:Record<string,unknown>)=>Promise<string>;unpackVerified:(packed:string)=>Promise<unknown>}>
+type VerifiedSecureAdapter=VerifiedGatewaySecureAdapter
 type Options=BaseOptions&(
  Readonly<{transportProfile:'oidc-bootstrap-json';clientId?:never;secureTransportAdapter?:never}>
  |Readonly<{transportProfile:'registered-didcomm-encrypted';clientId:string;secureTransportAdapter:VerifiedSecureAdapter}>
@@ -71,6 +71,7 @@ export class IndividualRegistrationSubmitError extends Error{
 export class IndividualRegistrationClient{
  private readonly baseUrl:string
  private readonly prefix:string
+ private readonly transport:RegisteredGatewayTransport
  constructor(private readonly options:Options){
   const url=new URL(options.baseUrl)
   if(url.username||url.password||url.search||url.hash||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(url.hostname))))throw new TypeError('individual_registration_gateway_https_required')
@@ -81,6 +82,9 @@ export class IndividualRegistrationClient{
   if(!text(tenantId)||tenantId==='host'||!/^[-a-zA-Z0-9]+$/u.test(tenantId)||!/^\p{L}{2}(?:-[A-Za-z0-9]{1,3})?$/u.test(jurisdiction)||!/^[-a-z0-9]+$/u.test(sector))throw new TypeError('individual_registration_route_invalid')
   this.baseUrl=url.href.replace(/\/+$/u,'')
   this.prefix=`/${encodeURIComponent(tenantId)}/cds-${encodeURIComponent(jurisdiction)}/v1/${encodeURIComponent(sector)}/individual/org.schema`
+  this.transport=new RegisteredGatewayTransport({...options,baseUrl:this.baseUrl,errorPrefix:'individual_registration',
+   submitError:(status,body)=>new IndividualRegistrationSubmitError(status,body),
+   secureTransportAdapter:options.transportProfile==='registered-didcomm-encrypted'?options.secureTransportAdapter:undefined})
  }
  async registerIndividualOrganization(input:RegistrationInput,pollOptions?:PollOptions){
   const payload=this.message('Family-registration-form-v1.0',input.claims)
@@ -116,41 +120,7 @@ export class IndividualRegistrationClient{
  private message(type:string,values:Readonly<Record<string,unknown>>):Row{
   return {jti:randomUUID(),thid:randomUUID(),iss:this.options.issuerDid,aud:this.options.recipientDid,...(this.options.transportProfile==='registered-didcomm-encrypted'?{client_id:this.options.clientId}:{}),type:'application/didcomm-plain+json',body:{data:[{type,resource:{meta:{claims:structuredClone(values)}}}]}}
  }
- private async post(path:string,payload:Row){
-  const secure=this.options.transportProfile==='registered-didcomm-encrypted'?this.options.secureTransportAdapter:undefined
-  const packed=secure?await secure.pack(payload):undefined
-  if(secure&&!text(packed))throw new Error('individual_registration_encrypted_request_required')
-  const mediaType=secure?'application/x-www-form-urlencoded':'application/json'
-  const response=await(this.options.fetchImpl??fetch)(`${this.baseUrl}${this.prefix}/${path}`,{
-   method:'POST',redirect:'error',signal:AbortSignal.timeout(Math.max(1,Math.floor(this.options.requestTimeoutMs??15000))),
-   headers:{Authorization:`Bearer ${this.options.bearerToken}`,'Content-Type':mediaType,Accept:mediaType,...(this.options.appInfo?buildGatewayApplicationHeaders(this.options.appInfo):{})},body:secure?`request=${encodeURIComponent(packed!)}`:JSON.stringify(payload),
-  })
-  const raw=await response.text();let body:unknown=raw
-  if(raw){try{body=JSON.parse(raw)}catch{}}
-  if(!response.ok)throw new IndividualRegistrationSubmitError(response.status,body)
-  if(secure&&response.status!==202){
-   const responsePacked=typeof body==='string'?new URLSearchParams(body).get('response'):record(body)?.response
-   if(typeof responsePacked!=='string'||!responsePacked.trim())throw new Error('individual_registration_encrypted_response_required')
-   body=await secure.unpackVerified(responsePacked)
-  }
-  return {status:response.status,body,...(response.headers.get('location')?{location:response.headers.get('location')!}:{})}
- }
  private async exchange(resource:string,action:string,payload:Row,options:PollOptions={}):Promise<SubmitAndPollResult>{
-  const submit=await this.post(`${resource}/${action}`,payload)
-  const started=Date.now(),timeout=options.timeoutMs??60000
-  for(let attempts=1;;attempts++){
-   if(Date.now()-started>=timeout)throw new Error('individual_registration_poll_timeout')
-   const poll=await this.post(`${resource}/${action}-response`,{thid:payload.thid,iss:payload.iss,aud:payload.aud,...(this.options.transportProfile==='registered-didcomm-encrypted'?{client_id:this.options.clientId}:{})})
-   if(poll.status!==202){
-    const envelope=record(poll.body)
-    if(this.options.transportProfile==='registered-didcomm-encrypted'&&(envelope?.iss!==this.options.recipientDid||envelope?.aud!==this.options.issuerDid||envelope?.thid!==payload.thid))throw new Error('individual_registration_response_binding_invalid')
-    if((envelope?.iss!==undefined&&envelope.iss!==this.options.recipientDid)||(envelope?.aud!==undefined&&envelope.aud!==this.options.issuerDid)||(envelope?.thid!==undefined&&envelope.thid!==payload.thid))throw new Error('individual_registration_response_issuer_binding_invalid')
-    for(const row of entries(poll.body)){const status=Number(record(row.response)?.status);if(status>=400)throw new IndividualRegistrationSubmitError(status,poll.body)}
-    return {submit,poll:{...poll,attempts}}
-   }
-   const remaining=timeout-(Date.now()-started)
-   if(remaining<=0)throw new Error('individual_registration_poll_timeout')
-   await new Promise(resolve=>setTimeout(resolve,Math.min(remaining,Math.max(0,options.intervalMs??2000))))
-  }
+  return this.transport.exchange(`${this.prefix}/${resource}/${action}`,payload,this.options.recipientDid,options)
  }
 }
