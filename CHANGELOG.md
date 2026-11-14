@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Persist provisional subject registrations and pending responsible-party
+  invitations atomically through the existing transactional vault. Retain exact
+  request replay after later claim; reject changed requests and other creator
+  organizations without registering an owned or discoverable card.
+- Extend the authenticated portal peer transport with an injected registration
+  provider and preserve its explicit conflict and admission errors.
+
 - Replace direct imports from <https://github.com/Global-DataCare/gdc-common-utils-ts>
   with SOS storage, workforce, Consent and Communication contracts plus FHIR and
   Antifraud utilities.
