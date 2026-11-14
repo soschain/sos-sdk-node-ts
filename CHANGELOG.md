@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Read immutable registration creation receipts through the same authenticated
+  peer transport, restricted to the admitted creator organization. Later
+  controller claim does not invalidate that historical receipt or turn its
+  pending-at-creation fields into live ownership status.
+
 - Persist provisional subject registrations and pending responsible-party
   invitations atomically through the existing transactional vault. Retain exact
   request replay after later claim; reject changed requests and other creator

@@ -60,7 +60,6 @@ export class ProvisionalSubjectRegistrationVault{
   const record=await this.options.store.get<ProvisionalSubjectRegistrationRecord>(provisionalSubjectRegistrationCollections(this.options.scopeKey).registrations,input.registrationId)
   if(!record||record.expiresAt<=this.now())throw failure('subject_registration_not_found',404)
   if(record.scopeKey!==this.options.scopeKey||record.creatorOrganizationReference!==creator.organizationReference)throw failure('subject_registration_forbidden',403)
-  if(record.status!=='provisional')throw failure('subject_registration_request_conflict',409)
   return record.receipt
  }
 }

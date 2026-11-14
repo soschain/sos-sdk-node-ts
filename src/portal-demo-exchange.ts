@@ -214,7 +214,8 @@ export type PortalDemoCareInboxProvider=(input:Readonly<{scope:DemoWorkspaceScop
 export type PortalDemoCatalogSnapshot=OrganizationCatalogVaultSnapshot&Readonly<{directory?:readonly import('sos-data-utils-ts/portal-demo-service-directory').PortalDemoServiceDirectoryEntry[]}>
 export type PortalDemoCatalogProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;catalog:OrganizationCatalogVaultOperation}>)=>Promise<PortalDemoCatalogSnapshot>
 export type PortalDemoRegistrationProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;command:SubjectRegistrationCommand}>)=>Promise<ProvisionalSubjectRegistrationReceipt>
-export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory;careInboxProvider?:PortalDemoCareInboxProvider;consentProviderFactory?:PortalDemoConsentProviderFactory;catalogProvider?:PortalDemoCatalogProvider;registrationProvider?:PortalDemoRegistrationProvider}>) {
+export type PortalDemoRegistrationReadProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;registrationId:string}>)=>Promise<ProvisionalSubjectRegistrationReceipt>
+export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory;careInboxProvider?:PortalDemoCareInboxProvider;consentProviderFactory?:PortalDemoConsentProviderFactory;catalogProvider?:PortalDemoCatalogProvider;registrationProvider?:PortalDemoRegistrationProvider;registrationReadProvider?:PortalDemoRegistrationReadProvider}>) {
   const authorized=serviceCredential(options.bearer)
   collections(options.scope)
   return async(request:Request):Promise<Response>=>{
@@ -222,13 +223,21 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
     if (request.method!=='POST') return Response.json({error:'method_not_allowed'},{status:405})
     try {
       const text=await request.text();if(Buffer.byteLength(text)>32_768) return Response.json({error:'demo_exchange_request_too_large'},{status:413})
-      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;consent:PortalDemoConsentOperation;catalog:OrganizationCatalogVaultOperation;command:unknown}
+      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;consent:PortalDemoConsentOperation;catalog:OrganizationCatalogVaultOperation;command:unknown;registrationId:string}
       collections(body.scope)
       if(body.scope.key!==options.scope.key) return Response.json({error:'demo_exchange_scope_forbidden'},{status:403})
       if(body.operation==='registerSubject'){
         if(!options.registrationProvider)throw new Error('subject_registration_provider_unavailable')
         validateVerifiedPhone(body.participant?.verifiedPhone)
         const result=await options.registrationProvider({scope:body.scope,participant:body.participant,command:normalizeSubjectRegistrationCommand(body.command)})
+        assertProvisionalSubjectRegistrationReceipt(result)
+        return Response.json({result})
+      }
+      if(body.operation==='readSubjectRegistration'){
+        if(!options.registrationReadProvider)throw new Error('subject_registration_provider_unavailable')
+        if(typeof body.registrationId!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(body.registrationId))throw new TypeError('subject_registration_identifier_invalid')
+        validateVerifiedPhone(body.participant?.verifiedPhone)
+        const result=await options.registrationReadProvider({scope:body.scope,participant:body.participant,registrationId:body.registrationId})
         assertProvisionalSubjectRegistrationReceipt(result)
         return Response.json({result})
       }
@@ -282,7 +291,7 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
       const code=/^(?:demo_|portal_rtc_|care_|encounter_|consent_|catalog_|subject_registration_)[a-z0-9_]+$/u.test(message)?message
         :error instanceof SyntaxError||error instanceof TypeError?'demo_exchange_request_invalid':'demo_exchange_failed'
       const status=code==='demo_exchange_failed'?502:['demo_care_provider_unavailable','demo_consent_provider_unavailable','demo_catalog_provider_unavailable','subject_registration_provider_unavailable'].includes(code)?503:code==='care_context_expired'?401
-        :code==='demo_card_not_found'||code.startsWith('care_')&&code.endsWith('_not_found')?404
+        :code==='demo_card_not_found'||code.startsWith('care_')&&code.endsWith('_not_found')||code==='subject_registration_not_found'?404
           :/forbidden|required|identity_mismatch/u.test(code)?403:/transition_invalid|revision_conflict|resource_conflict|idempotency_conflict|request_conflict/u.test(code)?409:400
       return Response.json({error:code},{status})
     }
@@ -299,6 +308,11 @@ export class PortalDemoExchangeClient {
   resolveCard(scope:DemoWorkspaceScope,cardNumber:string):Promise<PortalDemoCard> {return this.call({operation:'resolveCard',scope,cardNumber})}
   async registerSubject(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant,command:SubjectRegistrationCommand):Promise<ProvisionalSubjectRegistrationReceipt>{
     const result=await this.call<ProvisionalSubjectRegistrationReceipt>({operation:'registerSubject',scope,participant,command:normalizeSubjectRegistrationCommand(command)})
+    assertProvisionalSubjectRegistrationReceipt(result)
+    return result
+  }
+  async readSubjectRegistration(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant,registrationId:string):Promise<ProvisionalSubjectRegistrationReceipt>{
+    const result=await this.call<ProvisionalSubjectRegistrationReceipt>({operation:'readSubjectRegistration',scope,participant,registrationId})
     assertProvisionalSubjectRegistrationReceipt(result)
     return result
   }

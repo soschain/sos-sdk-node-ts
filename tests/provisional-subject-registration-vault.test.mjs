@@ -41,6 +41,13 @@ test('retains registration idempotency after a later explicit controller claim',
  assert.deepEqual(await provider.register({participant:{},command:input}),receipt)
  assert.equal((await store.query(names.registrations,{})).length,1)
 })
+test('reads the immutable creation receipt after an explicit controller claim without treating it as live ownership state',async()=>{
+ const {provider,store,names}=await setup(),input=command()
+ const receipt=await provider.register({participant:{},command:input})
+ const record=await store.get(names.registrations,receipt.registrationId)
+ await store.put(names.registrations,{...record,status:'claimed',claimedByOwnerHash:createHash('sha256').update(`${safe.tenantId}\0${safe.resourceUuid}`).digest('hex')})
+ assert.deepEqual(await provider.read({participant:{},registrationId:receipt.registrationId}),receipt)
+})
 test('fails closed before writes when trusted creator admission rejects or expires',async()=>{
  for(const assertCreator of [async()=>{throw Object.assign(new Error('subject_registration_forbidden'),{status:403})},async()=>({...creator,expiresAt:0})]){
   const {provider,store,names}=await setup({assertCreator})
@@ -94,4 +101,14 @@ test('uses the existing authenticated peer client and handler with an injected r
  await assert.rejects(denied.registerSubject(scope,{},command()),/unauthorized/)
  assert.equal(admitted,1)
  await assert.rejects(client.registerSubject(scope,{actorIdentifier:creator.actorIdentifier},{...intent,subject:{...intent.subject,alternateName:'Changed'}}),error=>error.status===409&&/request_conflict/.test(error.message))
+})
+test('reads persisted registration receipts through the same authenticated peer transport and creator admission',async()=>{
+ const scope=buildDemoWorkspaceScope({deployment:'test',network:'demo',portalFamily:safe.tenantId,tenantId:`demo-${safe.tenantId}`})
+ const {provider,store}=await setup({scopeKey:scope.key,assertCreator:async participant=>participant.other?{...creator,organizationReference:`Organization/${safe.demoOrganizationUuids.healthCare}`}:creator})
+ const receipt=await provider.register({participant:{},command:command()})
+ const handler=createPortalDemoExchangeHandler({exchange:new PortalDemoExchange({store}),scope,bearer:'synthetic-subject-registration-peer-credential',registrationReadProvider:input=>provider.read(input)})
+ const client=new PortalDemoExchangeClient({baseUrl:'http://localhost',bearer:'synthetic-subject-registration-peer-credential',fetchImpl:async(url,init)=>handler(new Request(url,init))})
+ assert.deepEqual(await client.readSubjectRegistration(scope,{actorIdentifier:creator.actorIdentifier},receipt.registrationId),receipt)
+ await assert.rejects(client.readSubjectRegistration(scope,{other:true},receipt.registrationId),error=>error.status===403&&/forbidden/.test(error.message))
+ await assert.rejects(client.readSubjectRegistration(scope,{},randomUUID()),error=>error.status===404&&/not_found/.test(error.message))
 })
