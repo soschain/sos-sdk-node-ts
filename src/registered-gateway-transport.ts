@@ -1,3 +1,5 @@
+import {createHash,randomBytes,randomUUID} from 'node:crypto'
+import {CryptographyService,type PublicJwk} from 'antifraud-data-utils-ts/cryptography'
 import {buildGatewayApplicationHeaders} from 'sos-data-utils-ts/gateway-application-identity'
 import type {AppInfo,PollOptions,SubmitAndPollResult} from 'sos-data-utils-ts/gateway-transport-contract'
 
@@ -8,6 +10,37 @@ export type VerifiedGatewaySecureAdapter=Readonly<{
 }>
 type Row=Record<string,unknown>
 const record=(value:unknown):Row|undefined=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Row:undefined
+const text=(value:unknown):string|undefined=>typeof value==='string'&&value.trim()?value.trim():undefined
+
+/** Reuses opened-wallet custody and verifies the decrypted JWS with the configured GW's public key. */
+export function createVerifiedGatewaySecureAdapter(options:Readonly<{
+ gatewayDid:string
+ pack:(message:Record<string,unknown>)=>Promise<string>
+ decrypt:(packed:string)=>Promise<Readonly<{content:unknown;meta:Record<string,unknown>}>>
+ resolveGatewaySigningJwk:(gatewayDid:string)=>Promise<PublicJwk>
+ errorPrefix?:string
+}>):VerifiedGatewaySecureAdapter{
+ const prefix=options.errorPrefix??'individual_registration'
+ if(!text(options.gatewayDid)?.startsWith('did:web:'))throw new TypeError(`${prefix}_gateway_identity_required`)
+ const {gatewayDid,pack,decrypt,resolveGatewaySigningJwk}=options
+ const crypto=new CryptographyService({getRandomBytes:async count=>randomBytes(count),digestString:async(data,algorithm)=>createHash(algorithm.replaceAll('-','').toLowerCase()).update(data).digest('hex'),randomUUID})
+ return Object.freeze({gatewayDid,pack,unpackVerified:async(packed:string)=>{
+  const decrypted=await decrypt(packed)
+  const compact=record(decrypted.meta.jws)?.compact
+  if(typeof compact!=='string')throw new Error(`${prefix}_signed_response_required`)
+  const parts=compact.split('.')
+  if(parts.length!==3||parts.some(part=>!part||!/^[A-Za-z0-9_-]+$/u.test(part)))throw new Error(`${prefix}_signed_response_required`)
+  const header=record(JSON.parse(Buffer.from(parts[0]!,'base64url').toString('utf8')))
+  // The untrusted header never selects a key URI, identity, or resolver target.
+  const key=await resolveGatewaySigningJwk(gatewayDid)
+  if(key.kty!=='AKP'||!['ML-DSA-44','ML-DSA-65','ML-DSA-87'].includes(key.alg)||typeof key.pub!=='string'||'d'in key||'dBytes'in key||'privBytes'in key
+   ||!text(key.kid)||header?.kid!==key.kid||header?.alg!==key.alg||!await crypto.verifyJws(compact,key))throw new Error(`${prefix}_response_signature_invalid`)
+  const content:unknown=JSON.parse(Buffer.from(parts[1]!,'base64url').toString('utf8'))
+  if(!record(content))throw new Error(`${prefix}_response_payload_invalid`)
+  return content
+ }})
+}
+
 export function gatewayResponseEntries(value:unknown):Row[]{
  const root=record(value),body=record(root?.body)??root
  return Array.isArray(body?.data)?body.data.map(record).filter((row):row is Row=>!!row):[]

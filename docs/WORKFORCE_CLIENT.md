@@ -56,12 +56,26 @@ credential, employee assignment, licensed role and bounded device allowance.
 The BFF owns profile persistence, PIN protection and one-use installation
 redemption. No local grant or successful HTTP orchestration establishes those
 postconditions by itself. Existing registered wallet keys are never rotated.
-The public key set retains the communication signing/KEM pair and can include
-one distinct existing actor-signing ES384/P-384 public key used by current
-professional enrollment. Duplicate key IDs, private/symmetric material and
-unknown extra keys are rejected. The document-at-rest key stays local. Storing
-the actor public key does not prove an evidence signature or authorize evidence
-attestation; those remain separately verified operations.
+Existing communication-pair and three-key actor/communication inputs retain
+their compatibility path. Full professional enrollment retains the original
+five DCR keys selected from six purpose-separated custody descriptors:
+
+| Scope | Purpose | Algorithm | Sent to DCR |
+| --- | --- | --- | --- |
+| Profile | Actor signing | ES384/P-384 | Yes |
+| Profile | Document at rest | ML-KEM-768 | No |
+| Runtime | OpenID ID-token signing | ES384/P-384 | Yes |
+| Runtime | VP-token signing | ES384/P-384 | Yes |
+| Runtime | Communication signing | ML-DSA-44 | Yes |
+| Runtime | Communication encryption | ML-KEM-768 | Yes |
+
+For the five-key input, pass the trusted helper's `enrollmentKeyDescriptors`.
+Every purpose/scope must match its exact public material and key ID; descriptor
+labels from a caller do not establish ownership or authority. Duplicate key
+IDs, private/symmetric material and unknown purposes are rejected. The document
+key stays local. Managed professional VP signing uses the distinct runtime
+VP-token key, never the profile actor key. Merely storing public keys proves no
+evidence signature or evidence-attestation authority.
 Redirect URIs require HTTPS by default. A trusted host can explicitly set
 `allowLoopbackRedirectUris: true` for its local portal callbacks. This permits
 HTTP only on `localhost`, `127.0.0.1` and `[::1]`, retaining the configured ports

@@ -5,6 +5,8 @@ import {
   type NodeLegalOrganizationVerificationTransactionInput, type PollOptions,
   type RouteContext, type SubmitAndPollResult,
 } from './organization-registration-client.js'
+import {createVerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
+import type {PublicJwk as SigningPublicJwk} from 'antifraud-data-utils-ts/cryptography'
 import {OrganizationRegistrationWallet} from './organization-registration-wallet.js'
 import {buildAuthorityDidWeb,resolveDidWebKeyAgreementJwk} from './did-web-recipient.js'
 
@@ -37,6 +39,7 @@ export type SecureOrganizationRegistrationRuntimeOptions = Readonly<{
   gatewayBaseUrl: string
   appInfo?: AppInfo
   resolveRecipientJwk(recipientDid: string): Promise<PublicJwk>
+  resolveGatewaySigningJwk(gatewayDid: string): Promise<SigningPublicJwk>
   fetchImpl?: typeof fetch
   requestTimeoutMs?: number
 }>
@@ -91,14 +94,19 @@ export class SecureOrganizationRegistrationRuntime {
     const wallet = new OrganizationRegistrationWallet({ resolveRecipientJwk: this.options.resolveRecipientJwk })
     const context = buildOrganizationRegistrationWalletContext(walletKeyDerivationId)
     await wallet.provisionCommunicationKeys(context,walletSeed)
+    const adapter=createVerifiedGatewaySecureAdapter({
+      gatewayDid:required(input.hostContext.hostDid,'organization_registration_gateway_identity_required'),
+      pack:message=>wallet.packForRecipientWithContext(message,providerDid,{context}),
+      decrypt:packed=>wallet.unpackWithContext(packed,{context}),
+      resolveGatewaySigningJwk:this.options.resolveGatewaySigningJwk,
+      errorPrefix:'organization_registration',
+    })
     return new OrganizationRegistrationClient({
       baseUrl: this.options.gatewayBaseUrl, bearerToken, ctx: input.routeContext,
       appInfo: this.options.appInfo, fetchImpl: this.options.fetchImpl, requestTimeoutMs: this.options.requestTimeoutMs,
       transportProfile: TransportProfiles.DidcommEncryptedForm,
-      secureTransportAdapter: {
-        pack: message => wallet.packForRecipientWithContext(message, providerDid, { context }),
-        unpack: async jwe => (await wallet.unpackWithContext(jwe, { context })).content,
-      },
+      expectedResponseIssuer:input.hostContext.hostDid,
+      secureTransportAdapter: {pack:adapter.pack,unpack:adapter.unpackVerified},
     })
   }
 }

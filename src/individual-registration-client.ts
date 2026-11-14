@@ -1,11 +1,11 @@
-import {createHash,randomBytes,randomUUID} from 'node:crypto'
-import {RegisteredGatewayTransport,type VerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
+import {randomUUID} from 'node:crypto'
+import {RegisteredGatewayTransport,createVerifiedGatewaySecureAdapter,type VerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
 import type {AppInfo,PollOptions,RouteContext,SubmitAndPollResult} from 'sos-data-utils-ts/gateway-transport-contract'
 import {HL7_CODING_SYSTEM_V3_ROLE_CODE} from 'fhir-data-utils-ts'
 import {HealthcareActorRoleCodes} from 'sos-data-utils-ts/healthcare-roles'
 import {readIndividualOrganizationBootstrapReceipt,type IndividualOrganizationBootstrapIdentity} from 'sos-data-utils-ts/individual-registration-contract'
 import {GatewayResponseEntryTypes} from 'sos-data-utils-ts/gateway-response-contract'
-import {CryptographyService,type PublicJwk} from 'antifraud-data-utils-ts/cryptography'
+import {type PublicJwk} from 'antifraud-data-utils-ts/cryptography'
 
 type BaseOptions=Readonly<{
  baseUrl:string;bearerToken:string;ctx:RouteContext;issuerDid:string;recipientDid:string
@@ -31,24 +31,7 @@ export function createIndividualRegistrationSecureAdapter(options:Readonly<{
  decrypt:(packed:string)=>Promise<Readonly<{content:unknown;meta:Record<string,unknown>}>>
  resolveGatewaySigningJwk:(gatewayDid:string)=>Promise<PublicJwk>
 }>):VerifiedSecureAdapter{
- if(!text(options.gatewayDid)?.startsWith('did:web:'))throw new TypeError('individual_registration_gateway_identity_required')
- const {gatewayDid,pack,decrypt,resolveGatewaySigningJwk}=options
- const crypto=new CryptographyService({getRandomBytes:async count=>randomBytes(count),digestString:async(data,algorithm)=>createHash(algorithm.replaceAll('-','').toLowerCase()).update(data).digest('hex'),randomUUID})
- return Object.freeze({gatewayDid,pack,unpackVerified:async(packed:string)=>{
-  const decrypted=await decrypt(packed)
-  const compact=record(decrypted.meta.jws)?.compact
-  if(typeof compact!=='string')throw new Error('individual_registration_signed_response_required')
-  const parts=compact.split('.')
-  if(parts.length!==3||parts.some(part=>!part||!/^[A-Za-z0-9_-]+$/u.test(part)))throw new Error('individual_registration_signed_response_required')
-  const header=record(JSON.parse(Buffer.from(parts[0]!,'base64url').toString('utf8')))
-  // The untrusted header never selects a key URI, identity, or resolver target.
-  const key=await resolveGatewaySigningJwk(gatewayDid)
-  if(key.kty!=='AKP'||!['ML-DSA-44','ML-DSA-65','ML-DSA-87'].includes(key.alg)||typeof key.pub!=='string'||'d'in key||'dBytes'in key||'privBytes'in key
-   ||!text(key.kid)||header?.kid!==key.kid||header?.alg!==key.alg||!await crypto.verifyJws(compact,key))throw new Error('individual_registration_response_signature_invalid')
-  const content:unknown=JSON.parse(Buffer.from(parts[1]!,'base64url').toString('utf8'))
-  if(!record(content))throw new Error('individual_registration_response_payload_invalid')
-  return content
- }})
+ return createVerifiedGatewaySecureAdapter(options)
 }
 
 /** A terminal GW rejection retains its status and body and never starts another poll. */

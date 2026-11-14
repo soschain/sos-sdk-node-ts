@@ -7,6 +7,7 @@ import type {AppInfo,PollOptions,RouteContext} from 'sos-data-utils-ts/gateway-t
 import type {EmployeeActivationGrant} from 'sos-data-utils-ts/employee-routing'
 import {employeeActivationGrantMatchesContact} from './employee-activation-grant.js'
 import {RegisteredGatewayTransport,gatewayResponseEntries,type VerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
+import type {ServerProfileKeyDescriptor} from './server-profile-custody-keys.js'
 
 type Row=Record<string,unknown>
 const record=(value:unknown):Row|undefined=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Row:undefined
@@ -19,24 +20,56 @@ function sameContact(row:Row,contact:ActorContactInput):boolean{
  const value=claims(row)[contact.contactKind==='phone'?Person.Telephone:Person.Email]
  try{return typeof value==='string'&&buildStableActorIdentifier({...contact,contact:value})===buildStableActorIdentifier(contact)}catch{return false}
 }
-function devicePublicKeys(input:readonly Readonly<Row>[]):Row[]{
+function publicKeySnapshot(value:unknown):Row{
  const failure=()=>new TypeError('workforce_device_public_keys_required')
- if(!Array.isArray(input)||input.length<2||input.length>3)throw failure()
- const keys=input.map(value=>{
-  if(!value||typeof value!=='object'||Array.isArray(value))throw failure()
-  const descriptors=Object.getOwnPropertyDescriptors(value)
-  if(Object.values(descriptors).some(descriptor=>!Object.hasOwn(descriptor,'value')))throw failure()
-  const key:Row=Object.fromEntries(Object.entries(descriptors).map(([name,descriptor])=>[name,descriptor.value]))
-  if(['d','dBytes','privBytes','priv','privateKey','secretKeyBytes','k'].some(field=>field in key)
-   ||!text(key.kid)||key.kid!==text(key.kid))throw failure()
-  return key
- })
+ if(!value||typeof value!=='object'||Array.isArray(value))throw failure()
+ const descriptors=Object.getOwnPropertyDescriptors(value)
+ if(Object.values(descriptors).some(descriptor=>!Object.hasOwn(descriptor,'value')))throw failure()
+ const key:Row=Object.fromEntries(Object.entries(descriptors).map(([name,descriptor])=>[name,descriptor.value]))
+ if(['d','dBytes','privBytes','priv','privateKey','secretKeyBytes','k'].some(field=>field in key)
+  ||!text(key.kid)||key.kid!==text(key.kid))throw failure()
+ // Supported operational JWK metadata is scalar or a string array, such as key_ops.
+ if(Object.values(key).some(item=>item!==undefined&&item!==null&&typeof item!=='string'&&typeof item!=='boolean'
+  &&!(Array.isArray(item)&&item.every(part=>typeof part==='string'))))throw failure()
+ return key
+}
+const keyMaterial=(key:Row)=>JSON.stringify(Object.keys(key).sort().map(name=>[name,key[name]]))
+function devicePublicKeys(input:readonly Readonly<Row>[],descriptors?:readonly ServerProfileKeyDescriptor[]):Row[]{
+ const failure=()=>new TypeError('workforce_device_public_keys_required')
+ if(!Array.isArray(input)||![2,3,5].includes(input.length))throw failure()
+ const keys=input.map(publicKeySnapshot)
  if(new Set(keys.map(key=>key.kid)).size!==keys.length)throw failure()
  const communicationSigning=keys.filter(key=>key.kty==='AKP'&&typeof key.pub==='string'&&!!key.pub)
  const communicationEncryption=keys.filter(key=>key.kty==='OKP'&&typeof key.x==='string'&&!!key.x)
- const actorSigning=keys.filter(key=>key.kty==='EC'&&key.crv==='P-384'&&key.alg==='ES384'
+ const profileSigning=keys.filter(key=>key.kty==='EC'&&key.crv==='P-384'&&key.alg==='ES384'
   &&typeof key.x==='string'&&!!key.x&&typeof key.y==='string'&&!!key.y&&(key.use===undefined||key.use==='sig'))
- if(communicationSigning.length!==1||communicationEncryption.length!==1||actorSigning.length!==(keys.length===3?1:0))throw failure()
+ if(communicationSigning.length!==1||communicationEncryption.length!==1||profileSigning.length!==keys.length-2)throw failure()
+ if(!descriptors){if(keys.length===5)throw new Error('workforce_key_purpose_binding_required');return keys}
+ const purposeFailure=()=>new Error('workforce_key_purpose_binding_invalid')
+ if(!Array.isArray(descriptors)||descriptors.length<keys.length||descriptors.length>keys.length+1)throw purposeFailure()
+ const required=new Map<string,readonly [string,string,string]>([
+  ['comm-signing',['runtime','ML-DSA-44','sig']],['comm-encryption',['runtime','ML-KEM-768','enc']],
+  ...(keys.length>=3?[['actor-signing',['profile','ES384','sig']] as const]:[]),
+  ...(keys.length===5?[['openid-id-token-signing',['runtime','ES384','sig']] as const,['vp-token-signing',['runtime','ES384','sig']] as const]:[]),
+ ])
+ const seen=new Set<string>(),descriptorKids=new Set<string>()
+ for(const descriptor of descriptors){
+  if(!descriptor||typeof descriptor!=='object')throw purposeFailure()
+  const key=publicKeySnapshot(descriptor.publicJwk)
+  if(descriptorKids.has(descriptor.kid)||descriptor.kid!==key.kid
+   ||(key.alg??key.crv)!==descriptor.alg||(key.use!==undefined&&key.use!==descriptor.use))throw purposeFailure()
+  descriptorKids.add(descriptor.kid)
+  if(descriptor.purpose==='document-at-rest'){
+   if(descriptor.ownerScope!=='profile'||descriptor.alg!=='ML-KEM-768'||descriptor.use!=='enc'
+    ||key.kty!=='OKP'||key.crv!=='ML-KEM-768'||typeof key.x!=='string'||keys.some(candidate=>candidate.kid===key.kid))throw purposeFailure()
+   continue
+  }
+  const expected=required.get(descriptor.purpose),candidate=keys.find(item=>item.kid===descriptor.kid)
+  if(!expected||seen.has(descriptor.purpose)||descriptor.ownerScope!==expected[0]||descriptor.alg!==expected[1]||descriptor.use!==expected[2]
+   ||!candidate||keyMaterial(candidate)!==keyMaterial(key))throw purposeFailure()
+  seen.add(descriptor.purpose)
+ }
+ if(seen.size!==required.size)throw purposeFailure()
  return keys
 }
 export class WorkforceSubmitError extends Error{
@@ -120,6 +153,7 @@ export class WorkforceClient{
  async enrollEmployeeDevice(input:Readonly<{
   grant:EmployeeActivationGrant;verifiedContact:ActorContactInput;activationCode:string;clientInstanceId:string
   publicJwks:readonly Readonly<Record<string,unknown>>[];redirectUris:readonly string[]
+  enrollmentKeyDescriptors?:readonly ServerProfileKeyDescriptor[]
  }>,pollOptions?:PollOptions){
   if(this.options.transportProfile!=='pre-dcr-didcomm-encrypted')throw new Error('workforce_explicit_pre_dcr_transport_required')
   const grant=input.grant
@@ -129,7 +163,7 @@ export class WorkforceClient{
   if(!getHealthcareRoleByClaim(grant.employeeRoleCode)||!Number.isFinite(Date.parse(grant.expiresAt))||Date.parse(grant.expiresAt)<=Date.now())throw new Error('workforce_recipient_grant_invalid')
   if(buildOrganizationEmployeeDidWeb({...input.verifiedContact,organizationDidWeb:grant.providerDid,role:grant.employeeRoleCode})!==grant.employeeDid)throw new Error('workforce_recipient_role_binding_invalid')
   const activationCode=requireText(input.activationCode,'workforce_activation_code_required'),clientInstanceId=requireText(input.clientInstanceId,'workforce_installation_required')
-  const publicJwks=devicePublicKeys(input.publicJwks)
+  const publicJwks=devicePublicKeys(input.publicJwks,input.enrollmentKeyDescriptors)
   if(!Array.isArray(input.redirectUris)||!input.redirectUris.length||input.redirectUris.some(uri=>{try{
    const parsed=new URL(uri)
    const allowed=parsed.protocol==='https:'||(this.options.allowLoopbackRedirectUris===true&&parsed.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(parsed.hostname))

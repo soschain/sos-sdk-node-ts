@@ -8,6 +8,7 @@ export const TransportProfiles=Object.freeze({DidcommEncryptedForm:'application/
 type SecureAdapter=Readonly<{pack:(message:Record<string,unknown>)=>Promise<string>;unpack:(jwe:string)=>Promise<unknown>}>
 type ClientOptions=Readonly<{
   baseUrl:string;bearerToken:string;ctx:RouteContext;appInfo?:AppInfo;fetchImpl?:typeof fetch
+  expectedResponseIssuer?:string
   requestTimeoutMs?:number;transportProfile:typeof TransportProfiles.DidcommEncryptedForm;secureTransportAdapter:SecureAdapter
 }>
 type HttpResult={status:number;body:unknown;location?:string;retryAfterMs?:number}
@@ -76,6 +77,10 @@ export class OrganizationRegistrationClient {
           const packed=typeof body==='string'?new URLSearchParams(body).get('response'):body&&typeof body==='object'?(body as Record<string,unknown>).response:undefined
           if(typeof packed!=='string'||!packed.trim())throw new Error('organization_registration_encrypted_response_required')
           body=await this.options.secureTransportAdapter.unpack(packed)
+          if(this.options.expectedResponseIssuer){
+            const envelope=body&&typeof body==='object'&&!Array.isArray(body)?body as Record<string,unknown>:undefined
+            if(envelope?.iss!==this.options.expectedResponseIssuer||envelope?.aud!==payload.iss||envelope?.thid!==payload.thid)throw new Error('organization_registration_response_binding_invalid')
+          }
         }
         return {submit:{status:submit.status,body:submit.body,...(submit.location?{location:submit.location}:{})},poll:{status:response.status,body,attempts}}
       }

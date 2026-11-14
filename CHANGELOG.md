@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Authenticate organization bootstrap receipts with the configured Gateway's
+  inner JWS and exact issuer, caller and thread binding before exposing tenant
+  authority; retain the Individual client's public verification API.
+- Preserve all five existing workforce DCR key purposes through the six-key
+  custody projection, keeping document storage material separate and rejecting
+  contradictory public-key algorithm/use descriptors.
+
 - Recover the existing six purpose-separated profile/runtime public keys from
   unlocked custody, retain all five DCR keys and keep the document key separate.
   Bind registered material exactly and expose distinct actor and VP ES384
