@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-14
+
 - Pin the published independent Antifraud, FHIR, SOS Data and Core contracts.
   Remove GDC from the resolved registry graph and use only the committed registry
   lockfile in CI, retaining Node.js 26.13.0. All 242 native checks pass, including
