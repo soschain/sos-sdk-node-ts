@@ -12,6 +12,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./server-profile-protection": {
+      "types": "./dist/server-profile-protection.d.ts",
+      "default": "./dist/server-profile-protection.js"
+    },
     "./organization-registration-wallet": {
       "types": "./dist/organization-registration-wallet.d.ts",
       "default": "./dist/organization-registration-wallet.js"

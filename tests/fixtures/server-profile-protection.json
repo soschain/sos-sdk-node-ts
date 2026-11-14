@@ -1,0 +1,25 @@
+{
+  "synthetic": true,
+  "sourceSha256": "d51663b2923cfc659e3897c00933e74abc923af267b3d3a7e57ccc803b891017",
+  "envelope": {
+    "version": "gdc-pin-host-envelope-v1",
+    "kdf": {
+      "name": "scrypt",
+      "saltBase64Url": "TuOaIAlEb66dG5zHwsbzlw",
+      "cost": 1024,
+      "blockSize": 8,
+      "parallelization": 1,
+      "keyLength": 32
+    },
+    "payload": {
+      "ivBase64Url": "z4BD5-NwWI7sYdCD",
+      "ciphertextBase64Url": "L79ezShueSUfydowj2v3caP5D2KRxdMXMPefr_Nku-bzro6oSLCs3ZmIgA",
+      "tagBase64Url": "rdyGF7U0XxbjVaMbmlwX8Q"
+    },
+    "pinWrappedHostDek": {
+      "ivBase64Url": "Cvz-2tmgXGrivj3B",
+      "ciphertextBase64Url": "zoM3xWiZ01uqauDIxxZwSMqDsMD8FaKgdKqqMOA7fpeYPaik3R2OtQ5rZbNdJs5mrz_pcXRLVY9uoHJrXAVSMcn1jY5mAg2KfDRni7Tz8HIITysOkA3l4o1lacRlK7so3zDDG6DaHobEvrMHhw",
+      "tagBase64Url": "MaQe1-v_JN9ED6vMxy6jKw"
+    }
+  }
+}

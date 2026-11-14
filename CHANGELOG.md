@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Protect and open persisted server-profile secrets through the SOS-owned
+  envelope contract, PIN-derived scrypt key and independent host sealer. Retain
+  existing ciphertext and purpose-specific AAD without replacing wallet seeds;
+  reject malformed parameters and distinguish PIN rejection from host failure.
+
 - Add contact-generic staff provisioning and recipient Token/DCR transport over
   shared registered submit/poll handling. Bind employee and seat receipts to the
   selected contact, role and actual resource UUID; keep commercial seat Orders
