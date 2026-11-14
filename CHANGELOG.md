@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Recover the existing six purpose-separated profile/runtime public keys from
+  unlocked custody, retain all five DCR keys and keep the document key separate.
+  Bind registered material exactly and expose distinct actor and VP ES384
+  signing with explicit client binding, without rotating keys or issuing roles.
+
 - Protect and open persisted server-profile secrets through the SOS-owned
   envelope contract, PIN-derived scrypt key and independent host sealer. Retain
   existing ciphertext and purpose-specific AAD without replacing wallet seeds;

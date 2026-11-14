@@ -12,6 +12,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./server-profile-custody-keys": {
+      "types": "./dist/server-profile-custody-keys.d.ts",
+      "default": "./dist/server-profile-custody-keys.js"
+    },
     "./server-profile-protection": {
       "types": "./dist/server-profile-protection.d.ts",
       "default": "./dist/server-profile-protection.js"
