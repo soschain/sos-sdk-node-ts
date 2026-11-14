@@ -12,6 +12,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./individual-registration-client": {
+      "types": "./dist/individual-registration-client.d.ts",
+      "default": "./dist/individual-registration-client.js"
+    },
+    "./registered-communication-wallet": {
+      "types": "./dist/registered-communication-wallet.d.ts",
+      "default": "./dist/registered-communication-wallet.js"
+    },
     "./portal-care-vault": {
       "types": "./dist/portal-care-vault.d.ts",
       "default": "./dist/portal-care-vault.js"

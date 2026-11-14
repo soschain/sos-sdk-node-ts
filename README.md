@@ -24,6 +24,10 @@ begins only after exact registry packages are installed and verified.
 
 Product-neutral Node adapters for trusted SOSCHAIN runtimes.
 
+Individual registration, verified encrypted responses and recovery of existing
+registered communication keys are documented in
+[`docs/INDIVIDUAL_REGISTRATION.md`](docs/INDIVIDUAL_REGISTRATION.md).
+
 ## BFF-owned synthetic Demo exchange
 
 The candidate `sos-sdk-node-ts/portal-care-vault` subpath prepares shared

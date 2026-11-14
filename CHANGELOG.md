@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Submit individual registration and recipient Order confirmation through owned
+  bootstrap or registered signed/encrypted transport. Bind actual gateway
+  identities, Offers, response signatures and separate controller assignments.
+- Recover the exact registered communication pair from an unlocked profile,
+  rejecting mismatched derivation context or public material without rotating keys.
+
 - Stage actual pending identity-document bytes as immutable scoped vault chunks,
   verify SHA3-384 CIDs by readback and publish metadata only in a small atomic
   finalization. Resume interrupted uploads without rewriting committed chunks;
