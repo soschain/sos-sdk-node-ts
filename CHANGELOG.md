@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add sealed controller-owned pending evidence with current transactional
+  custody resolution, independent document slots, opaque protected downloads,
+  immutable retries and exact-card reset/expiry cleanup. Reuse the same vault
+  usecase across host-selected Demo and Network adapters.
+
 - Submit purpose-fixed workflow Group/Consent entries through the existing
   registered workforce transport. Preserve provider/caller/thread binding and
   actual acknowledgements without exposing a generic gateway batch method.

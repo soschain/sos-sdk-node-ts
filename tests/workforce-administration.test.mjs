@@ -9,6 +9,7 @@ import {REPOSITORY_SAFE_EXAMPLES as safe} from 'sos-data-utils-ts/repository-pri
 import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
 import {OrganizationLifecycleClaim} from 'sos-data-utils-ts/organization-lifecycle-contract'
 import {buildTestNetworkControllerWorkflowAssignment,OrganizationWorkflowGroupKinds,OrganizationWorkflowCapabilities} from 'sos-data-utils-ts/organization-workflow-access'
+import {ClaimConsent,ConsentStatuses} from 'fhir-data-utils-ts'
 import {OrganizationRegistrationWallet} from '../dist/organization-registration-wallet.js'
 import {createVerifiedGatewaySecureAdapter} from '../dist/registered-gateway-transport.js'
 import {WorkforceClient} from '../dist/workforce-client.js'
@@ -183,8 +184,8 @@ function workflowPlan(){
   groupReference:`Group/${safe.resourceUuid}`,capabilities:[OrganizationWorkflowCapabilities.ScheduleCruds,OrganizationWorkflowCapabilities.SlotCruds],assignedAt:'2026-11-15T00:00:00.000Z'})
 }
 function workflowReply(resourceType,message){
- return {iss:providerDid,body:{resourceType:'Bundle',type:resourceType==='Group'?'batch-response':'_batch-response',data:message.body.data.map((entry,index)=>({
-  type:resourceType==='Group'?'Group-v5.0.0':'Consent',response:{status:String(index===0?201:200)},...(resourceType==='Group'?{resource:{resourceType:'Group',id:entry.resource.id}}:{}),
+ return {iss:providerDid,body:{resourceType:'Bundle',type:'batch-response',data:message.body.data.map((entry,index)=>({
+  type:`${resourceType}-v5.0.0`,response:{status:String(resourceType==='Consent'&&(entry.request.method==='PUT'||entry.request.method==='PATCH')?200:index===0?201:200)},resource:{resourceType,id:entry.resource.id,meta:{claims:Object.fromEntries(Object.entries(entry.resource.meta.claims).map(([key,value])=>[key,Array.isArray(value)?value:[value]]))}},
  }))}}
 }
 
@@ -218,6 +219,7 @@ test('workflow batches reject foreign reply bindings, failed entries and substit
   reply=>({...reply,thid:'synthetic-foreign-thread'}),
   reply=>({...reply,body:{...reply.body,data:[]}}),
   reply=>({...reply,body:{...reply.body,data:reply.body.data.map(row=>({...row,resource:{resourceType:'Group',id:safe.demoOrganizationUuids.healthCare}}))}}),
+  reply=>{const changed=structuredClone(reply);const claims=changed.body.data[0].resource.meta.claims;claims[Object.keys(claims)[0]]=['forged-claim'];return changed},
  ]
  for(const change of changed){
   const f=await fixture(async(_path,message)=>change(workflowReply('Group',message)))
@@ -240,4 +242,34 @@ test('workflow method accepts no arbitrary resource, URL, method or pre-DCR auth
  const options={...f.options,transportProfile:'pre-dcr-didcomm-encrypted'};delete options.clientId;delete options.tenantIssuer
  await assert.rejects(new WorkforceClient(options).submitWorkflowAccess(input),/workforce_registered_controller_transport_required/u)
  assert.equal(f.messages.length,0)
+})
+
+test('actual Consent revocation preserves every original claim and sends inactive PUT rather than a status-only patch',async()=>{
+ const original=workflowPlan().authorization
+ const resource={...original.resource,meta:{claims:{...original.resource.meta.claims,[ClaimConsent.status]:ConsentStatuses.Inactive}}}
+ const entry={...original,resource,request:{method:'PUT',url:`Consent/${resource.id}`}}
+ const f=await fixture(async(_path,message)=>workflowReply('Consent',message))
+ const result=await f.client.submitWorkflowAccess({resourceType:'Consent',entries:[entry],operationId:`workflow-revoke-${safe.resourceUuid}`},{intervalMs:0})
+ assert.equal(result.resourceType,'Consent')
+ assert.deepEqual(f.messages[0].message.body.data,[entry])
+ const claims=f.messages[0].message.body.data[0].resource.meta.claims
+ assert.deepEqual({...claims,[ClaimConsent.status]:ConsentStatuses.Active},original.resource.meta.claims)
+})
+
+test('historical routed Consent status-only PATCH returns the stored original inactive resource',async()=>{
+ const original=workflowPlan().authorization
+ const entry={...original,resource:{...original.resource,meta:{claims:{[ClaimConsent.status]:ConsentStatuses.Inactive}}},request:{method:'PATCH',url:`Consent/${original.resource.id}`}}
+ const f=await fixture(async(_path,message)=>{
+  const reply=workflowReply('Consent',message)
+  reply.body.data[0].resource.meta.claims=Object.fromEntries(Object.entries({...original.resource.meta.claims,[ClaimConsent.status]:ConsentStatuses.Inactive}).map(([key,value])=>[key,[value]]))
+  return reply
+ })
+ const result=await f.client.submitWorkflowAccess({resourceType:'Consent',entries:[entry],operationId:`workflow-patch-${safe.resourceUuid}`},{intervalMs:0})
+ assert.equal(result.resourceType,'Consent');assert.deepEqual(f.messages[0].message.body,{data:[entry]})
+})
+
+test('generic Consent acknowledgement cannot masquerade as the routed versioned organization receipt',async()=>{
+ const entry=workflowPlan().authorization
+ const f=await fixture(async()=>({iss:providerDid,body:{resourceType:'Bundle',type:'_batch-response',data:[{type:'Consent',response:{status:'201'}}]}}))
+ await assert.rejects(f.client.submitWorkflowAccess({resourceType:'Consent',entries:[entry],operationId:`workflow-wrong-owner-${safe.resourceUuid}`},{intervalMs:0}),/workforce_workflow_receipt_invalid/u)
 })

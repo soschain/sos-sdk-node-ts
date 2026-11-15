@@ -45,7 +45,8 @@ function workflowEntries(resourceType:'Group'|'Consent',input:readonly Organizat
  for(const value of input){
   const entry=workflowObject(value,['type','request','resource']),request=workflowObject(entry.request,['method','url']),resource=workflowObject(entry.resource,['resourceType','id','meta'])
   if(entry.type!==`${resourceType}-v5.0.0`||resource.resourceType!==resourceType||typeof resource.id!=='string'||!/^[A-Za-z0-9.-]{1,64}$/u.test(resource.id))throw workflowInvalid()
-  if((request.method==='POST'&&request.url!==resourceType)||(request.method==='PATCH'&&request.url!==`${resourceType}/${resource.id}`)||(request.method!=='POST'&&request.method!=='PATCH'))throw workflowInvalid()
+  const updates=resourceType==='Group'?['PATCH']:['PATCH','PUT']
+  if((request.method==='POST'&&request.url!==resourceType)||(updates.includes(String(request.method))&&request.url!==`${resourceType}/${resource.id}`)||(request.method!=='POST'&&!updates.includes(String(request.method))))throw workflowInvalid()
   const metadata=workflowObject(resource.meta,['claims']),values=workflowObject(metadata.claims)
   if(!Object.keys(values).length)throw workflowInvalid()
   for(const [name,value] of Object.entries(values)){
@@ -155,11 +156,16 @@ export class WorkforceClient{
   const entries=workflowEntries(resourceType,input.entries)
   const result=await this.transport.exchange(`${this.prefix}/organization/org.hl7.fhir.r5/${resourceType}/_batch`,this.administrationMessage({data:entries},operationId),identity.providerDid,pollOptions)
   const envelope=record(result.poll.body),body=record(envelope?.body)??envelope,rows=gatewayResponseEntries(result.poll.body)
-  if(!body||body.resourceType!=='Bundle'||!['batch-response','_batch-response'].includes(String(body.type))||rows.length!==entries.length)throw new Error('workforce_workflow_receipt_invalid')
+  if(!body||body.resourceType!=='Bundle'||body.type!=='batch-response'||rows.length!==entries.length)throw new Error('workforce_workflow_receipt_invalid')
   for(let index=0;index<rows.length;index++){
    const row=rows[index]!,response=record(row.response),resource=record(row.resource)
-   if(!/^(?:2[0-9]{2})(?: [A-Za-z][A-Za-z -]*)?$/u.test(String(response?.status))||row.type!==(resourceType==='Group'?'Group-v5.0.0':'Consent'))throw new Error('workforce_workflow_receipt_invalid')
-   if((resourceType==='Group'&&resource?.id!==entries[index]!.resource.id)||(resource?.id!==undefined&&resource.id!==entries[index]!.resource.id))throw new Error('workforce_workflow_receipt_invalid')
+   if(!/^(?:2[0-9]{2})(?: [A-Za-z][A-Za-z -]*)?$/u.test(String(response?.status))||row.type!==`${resourceType}-v5.0.0`||resource?.resourceType!==resourceType||resource.id!==entries[index]!.resource.id)throw new Error('workforce_workflow_receipt_invalid')
+   const returned=record(record(resource.meta)?.claims),requested=entries[index]!.resource.meta.claims
+   if(!returned)throw new Error('workforce_workflow_receipt_invalid')
+   for(const [name,value] of Object.entries(requested)){
+    const expected=typeof value==='string'?[value]:value,actual=returned[name]
+    if(!Array.isArray(actual)||actual.length!==expected.length||actual.some((item,position)=>item!==expected[position]))throw new Error('workforce_workflow_receipt_invalid')
+   }
   }
   return {resourceType,operationId,result}
  }

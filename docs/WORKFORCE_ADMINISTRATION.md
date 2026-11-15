@@ -14,10 +14,14 @@ controller, employee Occupation and governed capabilities before building a plan
 and saves local authorization only after terminal signed acknowledgements.
 
 Actual Group and Consent replies use the tenant provider issuer and original
-caller/thread. Group acknowledgements carry the requested Group ID; the current
-Consent acknowledgement is bare `Consent` without a returned resource ID. The
-client validates those actual shapes and never manufactures an ID or treats a
-Group membership alone as Consent authority.
+caller/thread. The organization route returns versioned `Group-v5.0.0` and
+`Consent-v5.0.0` entries with the requested resource type, ID and normalized
+claims. The client rejects the unrelated generic Consent acknowledgement and
+substituted requested claims. Group accepts POST/PATCH; the routed Consent
+owner preserves POST and stored-original inactive PATCH, with full-resource
+inactive PUT for explicit original-resource submissions. The gateway retains
+current controller, membership and capability admission; Group membership alone
+does not confer Consent authority.
 
 `getAdministration` submits fixed Employee and Licence searches, then validates
 the response claims into the Data-owned contact union and seven numeric licence

@@ -28,6 +28,10 @@
       "types": "./dist/server-profile-custody-keys.d.ts",
       "default": "./dist/server-profile-custody-keys.js"
     },
+    "./controller-identity-evidence-vault": {
+      "types": "./dist/controller-identity-evidence-vault.d.ts",
+      "default": "./dist/controller-identity-evidence-vault.js"
+    },
     "./profile-recovery-service": {
       "types": "./dist/profile-recovery-service.d.ts",
       "default": "./dist/profile-recovery-service.js"

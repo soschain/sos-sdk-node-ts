@@ -45,6 +45,8 @@ in [`docs/SERVER_PROFILE_CUSTODY_KEYS.md`](docs/SERVER_PROFILE_CUSTODY_KEYS.md)
 and [`docs/SERVER_PROFILE_PROTECTION.md`](docs/SERVER_PROFILE_PROTECTION.md).
 Controller recovery coordination and its atomic host boundary are described in
 [`docs/PROFILE_RECOVERY.md`](docs/PROFILE_RECOVERY.md).
+For controller-owned pending document custody and protected downloads, see
+[`docs/CONTROLLER_IDENTITY_EVIDENCE.md`](docs/CONTROLLER_IDENTITY_EVIDENCE.md).
 For transactional custody sessions and authorized PIN rewrap, see
 [`docs/REGISTERED_PROFILE_SESSIONS.md`](docs/REGISTERED_PROFILE_SESSIONS.md).
 For registered individual-controller discovery and SMART subject selection, see
