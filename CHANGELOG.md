@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add registered-profile custody sessions over the transactional vault, retaining
+  existing protected envelopes, AAD and registered keys. Bind account, profile
+  and routed provider context; commit authenticated PIN failures separately
+  from host outages and atomically revoke sessions on authorized PIN rewrap.
+
 ## 0.4.0 - 2026-11-14
 
 - Pin the published independent Antifraud, FHIR, SOS Data and Core contracts.

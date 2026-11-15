@@ -39,6 +39,8 @@ are documented in
 The existing purpose-separated profile keys and PIN/host protection are described
 in [`docs/SERVER_PROFILE_CUSTODY_KEYS.md`](docs/SERVER_PROFILE_CUSTODY_KEYS.md)
 and [`docs/SERVER_PROFILE_PROTECTION.md`](docs/SERVER_PROFILE_PROTECTION.md).
+For transactional custody sessions and authorized PIN rewrap, see
+[`docs/REGISTERED_PROFILE_SESSIONS.md`](docs/REGISTERED_PROFILE_SESSIONS.md).
 
 ## BFF-owned synthetic Demo exchange
 
