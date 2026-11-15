@@ -1,0 +1,90 @@
+{
+  "synthetic": true,
+  "description": "Newly captured synthetic ciphertext produced and read back by the historical published runtime; not a pre-existing persisted or production document. The negative owner probe is separately crafted using its published crypto engine.",
+  "seedOracle": "registered-communication-wallet.json",
+  "effectiveDerivationId": "synthetic-registered-profile",
+  "logicalProfileId": "synthetic-distinct-logical-profile",
+  "publicStorageJwk": {
+    "kty": "OKP",
+    "crv": "ML-KEM-768",
+    "x": "xFjJlIug2MxVmbGchKKwqBmTqjJ8-NOL-jS19sRk44ifHMka62izv_LM13Nl_EYj_ENsshzJADiH4ox-TQnHMgdq3-s4PrwsAHjAyccJehcV4aqWDiO0acI4v0o3jdh5lxI43cJoEKSeeJi7v9hCeIIhIupEBOB2VVd_WbMYfGRvitku64iI_Hp4FMZ15gOT6QgNH1NJqxqkBTjK4ee6XCUAgOIAjliB2vNWcnmjVXNj4Nw1gsylo4lBkPFoUAWJccGuSAMSnJCjyiKPJ6YnagFKFiKh8Cy-JAaonxtps3U1PwKouqOo93FLTkXO0jqZCGqvuowfK3xexKe-gqJ5HLhUEcxfvepTtLA6zeiXpXmJ8zdw0PaXKDoCZjFOOUcdygtyBkC_bMFW9gNMbUx7-eMGkKyBVNefw3NrFkDHGOnNI4ZRLndQ8CN_CFlWkcIfdgi4r-kgNUfHl1uh6xaaDkw63QmSleLA3RmKcHgyDGCIYbWjNwZ1wAMp_VN3qQEj_xmyMNWe-7s_kEhW2zKIHoNX8pa79rIpkCk1G4NCFmczOntJ33h70VioY6s4cROzJVC0hvCrjxkEjaUg64wbEpJbMOhWpdlIFyDM2RSdQ0sdUZKTyFA_icmG5dZ4cQWfZzdz_dOIA4EDg-IC_VN-H3czpCpzBSq06Kcx8iW20JSSe6hgcvSI-neGlQgD6UKiy3appUxhJxet_OCZz4I7VCYtuSRi6fB_4kRH_ExrhTZuqNu8qiqZjXKYAGeXwzqZocxrGEWytFYm9xtS6htpadwA81msQMmOhEdrU5uLVXDK3ZlJ3SeerrIPGdiNA_XLkrR_YGdhyATQ7VkAPvCjfEZvrLK4_kuBiHNvRim7QrGNWXhrMMx8PWkgfAShDqi-mDxSPfgCpvUWNgnIgES9CERSzPszNny2Qfpw_SEh5iVh0haKladCnQiRoUOwWjWbdJOK9WsPltVkd6NLjZeBAVR64JVNcCO0Lndu1Jwyt3t4wMgPE3lDopUwJANZkdxLs2yYDTeyyXLFHMYFIuEnCdgFxwoMj8Unx8U4SrAwFBhW7ikh3UElltAEtkGkXAI2UtWVTOOFt4IiVVnF1ak2CjCA7tRZBdRWdpQe2cWeA8tF4WJa3dkNJpBxLzp3fffMQlxmz4tmJQZoGXSkLGwx8WUlRstGb9Ns_ghoWWS3h9QTAdIBgMVT2oB-Ogl_yRF8lFADdAGKSZB6bLrKc7RebCRaIEacF_mazwEPJFpnNvKfWUVxBjmZ7ANsSSyXHvKwjst56pZcLXIRE4mgikBK17SWnGhKErZ78-kgj3S7-gKb95CIVMwrVJdyhqZ93hRW-RhwIqFmm4e4bYMDJGAt0AYYxtA8gXQFBAoSl-Eh8EUyiCZmm2mLU_PLCvp6owak_ltQPcONa3Su0FuphxiTBMzN9EwriwPGNUMkhCVnkgwXsuzEGBnDGWcGtwVxTdG1x4q93ULHiPDDjsaWoSa5UpxiTBQ-v8U6GomHnden9_VDb9xmOTs9QtALzpopUms5j5IH_d6HaQZ7tV5Yk6m9IbA4dMzS3gvs48RTjORPD58",
+    "kid": "vRlMBLw4LQsqFNoeq2XUbCE3zc48qYmEg-Y2DASFAN8"
+  },
+  "expectedDocument": {
+    "id": "synthetic-confidential-document",
+    "recordType": "synthetic-channel-cache",
+    "content": {
+      "version": 1,
+      "messages": [
+        {
+          "id": "synthetic-message",
+          "text": "Synthetic confidential content"
+        }
+      ]
+    }
+  },
+  "protectedDocument": {
+    "id": "synthetic-confidential-document",
+    "recordType": "synthetic-channel-cache",
+    "jwe": "eyJ0eXAiOiJnZGMtY29uZmlkZW50aWFsLWRvY3VtZW50K2p3ZSIsImN0eSI6ImFwcGxpY2F0aW9uL2pzb24iLCJlbmMiOiJBMjU2R0NNIiwiZ2RjX3BxX3Byb2ZpbGUiOiJjb25maWRlbnRpYWwtcHFjLXYxIiwiZ2RjX2tleV9wdXJwb3NlIjoiZG9jdW1lbnQtYXQtcmVzdCIsImdkY19vd25lcl9iaW5kaW5nIjoia2ROYV9ob3RFLTBNemNIRmJucDE3WkQ3b0dqYzZ3UzRjaVFBYkd1YW5qayIsImFsZyI6Ik1MLUtFTS03NjgrSEtERi1TSEEyNTYrQTI1NkdDTUtXIiwia2lkIjoidlJsTUJMdzRMUXNxRk5vZXEyWFViQ0UzemM0OHFZbUVnLVkyREFTRkFOOCJ9.eyJ2IjoiZ2RjLW1sa2VtLWNlay13cmFwLXYxIiwia2VtIjoiTUwtS0VNLTc2OCIsImtkZiI6IkhLREYtU0hBLTI1NiIsIndyYXAiOiJBMjU2R0NNIiwia2VtQ2lwaGVydGV4dCI6Ikw0ZkItWkUtbi1tSTlGUE42TTRRemRSU0NWTExRWTVTTmlRQ25WSnJIUm9wUlJmWnJmSk51Z1NxeHVnc2YzMHZKRHJFMkRwOG8tRXE4VThuSHQ3MFoyX2ZUM2pMQkhuRzNtTmNQTU53MlkwN04tdHpJUklDQkFtS1NtWlZLZlVHNG84SmV2QnBGRDhjM2g4a1NaUUEyUUw2T0Y1ZXZEaXdkZV9uaUVEVXBFaEEzNnZ1dzh1b081SUdGTDVZV2NCM1lqeVU3bVFUelNBWmFOUjdmS2c0OEJYNU1KYkpsVjQzS0ljdk56enRPYUhBQ0s3am9mWHFvSGdsTGQ5Mlo3ZmlSLW9Cblk4QlcwTmZCUTlYb1oyd1hCc2tMOG9lbHd0SkRlcXg5VDNob29hZ1VzNVNYbDJZRWZtUUd2WVRGZjhYRjZldk5UR0R3bmMwYng0ZmZjMzhBenRveU1yQjlHVEY4OEt6VzMyYmlmT3p2U0xnOU1PeVVtYktUb0ZjelFsaGtIZXozZUJIck5wYmYwQklEcnVYb3F2c1V6V1Q4bWJjekxNRURCX2c2eUtIa3N3Y3h5Y2VreFEyYTlzNTMtYXp3dVE3Q2huRTNCQzl2MDlnd2w1bFJtcHlJYzY1ZkdoczRSazJiVmp6QndmTlR3UEhGSnVrVGNZdmRNd3ZFSkphckw2WHlQVVBxZXFlWXkwSzREcWdnLW02MHJUV2FweXFHWXpfTFlfWUFqOXk1Z1dCT1RWdmkxQ25QblBjTUxMSDlPZ3ltWVdoMU9Sa21NTmM2R3V6MDJ6cGV2MVhVc3hidmhmR1phQ1JuU1g4dDAyQUg5Z0EtaGxNV21zcEtYVHY2S3F0YzhnTFNrMlN1dWFEU3NSX21uRjBvQWcwZEt1MHQ1djZnU1BVQzRLMjA2S3R6TGpTMDJDbXVjOWtaZHdTYlVRdU8tWHJhQ19VTXZQYlpGVWJnQ0x2RTQ0Qzc1SmJneE16MXVOa0RVb04ybUMwdUNvSkhKcko2VkZmand1Mm1pVTVRVDhZaHE4WUlPemUwVVZMQjRVeXpZMl95QzVKZmJUMkdVRUFaMk0zbWU1bG5HY3BPVTZPTEd5Vi1QeWFTcjVWVk1tcnNBamNoeEZZOHo2aXltQzBVaUdUSkgwc1M5NHhWc1NkNno0OEdQQnh5VFI4NEFUY1NvNV9MVlJhOGd4a2thY2hUU0J4dldYS2hXNWtCOTJGX0htekZvUkQ4X1FWSzNDN3VqSU5DZ2ZjQm9JN002UDFZc3YtUTAwQW5RWTZOd1UyZGRnY3lzNWlmSmh0RzZVVEVYVVgxMmoxMUlJU0daeXdISWxjS1VLUUY2VC12U0k4cm1HdjNIczQxM2ZWR0EyNGxaZWtVS1BJR29OdlI4MG9QaGFrZnRFRmVQTmN0TU5MMkVmdEc3aVAxbzlKR05qdVYxeUtrelBCcXh5V1Vob052TEZvSHVxUDl4RDRmcEtweUtwUzlZMjZwOVpBSzhtT1dibUVLWXgzMUtQY242S2lrYnV2SGlzMDNiYUQ0OUp0Wm1Rakxkby16Z1FId2VBYUh3dGpQeDg1NlFkMEpFbDZWRUZHSEppNGc3QzlrNW5xWVNlR2lma1hxejd2dm1LQjhIemVaU0s3OUN0X25GenBjV2FqaDdkZHo5SXJWTkpGVENSV25rM29kakY2TUpweTUtY2VLTDVhYjV4bUF6V0U0TE0xQ1FwbzJObHVFU21qZGdRb0VLS2tMbGhGWTd4ZmhWMUNNTDlNczdtVjRLWnBHSmJFS3MzazQ2Qk9PUV95OUhzcGFEU2JRTTd4VHhhdnVIUU5ZT0pnZS1nRFRKeWR2eFVHM0RxZE5manpuVXI2QkhIMVFTb002UmRhTHpqZkl2aWNPUUpOUkhkVzh4Znh1eW1xVWpOWUU1Zlh5YjNXVHlFIiwiaXYiOiJDbkVWS3NKZDNrSE5wMUZyIiwiY2lwaGVydGV4dCI6IlFoMnJrcnpoc2swbjNZUW96LXprSHNIaWw2OHM1R2YwNFZjTkd5OFdKcGc5VUdLbkdNR3Fwd2xFZVEiLCJ0YWciOiJFRi1ySVduODJTZVc1NExrU1E3QlhnIn0.fKjgKiWcJK6IaKot.BvWOwMZdcSLXCNsoE0D2t8lhtrAMP3gm8estsMQoDaYUBOPIgy-5pdwC7Mf3v5LxKiFSfzsHU47WdS786WjtA9dKVJMPZvrooKIyzQGzTc4Kb2306jnchuvG8ml3.Tm1T_UYe2uHxQjL3nJTVTQ"
+  },
+  "protectedHeader": {
+    "typ": "gdc-confidential-document+jwe",
+    "cty": "application/json",
+    "enc": "A256GCM",
+    "gdc_pq_profile": "confidential-pqc-v1",
+    "gdc_key_purpose": "document-at-rest",
+    "gdc_owner_binding": "kdNa_hotE-0MzcHFbnp17ZD7oGjc6wS4ciQAbGuanjk",
+    "alg": "ML-KEM-768+HKDF-SHA256+A256GCMKW",
+    "kid": "vRlMBLw4LQsqFNoeq2XUbCE3zc48qYmEg-Y2DASFAN8"
+  },
+  "negativeOwnerDocument": {
+    "id": "synthetic-confidential-document",
+    "recordType": "synthetic-channel-cache",
+    "jwe": "eyJ0eXAiOiJnZGMtY29uZmlkZW50aWFsLWRvY3VtZW50K2p3ZSIsImN0eSI6ImFwcGxpY2F0aW9uL2pzb24iLCJlbmMiOiJBMjU2R0NNIiwiZ2RjX3BxX3Byb2ZpbGUiOiJjb25maWRlbnRpYWwtcHFjLXYxIiwiZ2RjX2tleV9wdXJwb3NlIjoiZG9jdW1lbnQtYXQtcmVzdCIsImdkY19vd25lcl9iaW5kaW5nIjoiWmFVR2FlUW9GY1lRUVBuS09vM2RfaVJMUS0zOU5YUnRzR2FfQUNrLXZFRSIsImFsZyI6Ik1MLUtFTS03NjgrSEtERi1TSEEyNTYrQTI1NkdDTUtXIiwia2lkIjoidlJsTUJMdzRMUXNxRk5vZXEyWFViQ0UzemM0OHFZbUVnLVkyREFTRkFOOCJ9.eyJ2IjoiZ2RjLW1sa2VtLWNlay13cmFwLXYxIiwia2VtIjoiTUwtS0VNLTc2OCIsImtkZiI6IkhLREYtU0hBLTI1NiIsIndyYXAiOiJBMjU2R0NNIiwia2VtQ2lwaGVydGV4dCI6Ik1lYkl5ZmxMdWxWYTQtTkxBZGFTVTF4cjg4MnNqUFBLckp6MUVWaWdVWnhwSDRwRWhlcVZHR1ZkcXRUWjlwSVN1ZkFTd1VYbC1XQWM2M1pxQUhfcHZjMWo2N0JNQkZWd21vbjBFRlpHbnBBa1V6bHlFVUltaGt6QjdQYThPQkFqZV8zSlhGZXBtdTlFMXVrTjJpU2RzT25JSUw4ZHlzX0pWQ3JfYUpvMEJSVks0WWh4eWVTNjZUNVcwb0xWY0ZOYktCSkZzMmlXdVFRVkVCcG5JUVFMNHJyLVg3UGF0VENTUUFRNDJnQXB0djc2WlAxclZyWlJURWpKSFB4VDBwc3FEYkRnX1FSVHlBdG9LbDRzY3B1eVNZSm9Fbm1XM1VPTUxkRVR4Um9LbU5XRUlKck9iRG9Zd3NCd3JacFA3dDBkR21DOHRwYm9SOTFFQ2tlTC1vc18xUWRoWFZPdFZSaDJTTVJqVFRLM3duQWlpWTA2QlhTZ1c3SlBFZ084ZzVDOF9CeTdqUGVYcXhzSHJBelY0QzRqdGdxQ3ZqVE94ampXbGhLNmViYUpGN1JlemZtYXFzVFh1S19pbzBHQ3JUVmQtUFZMVXVUT2gzczdsVVhDaFdDcE4zdkk5NXgtb0hqdTdYSmRhQmhfclF3SFFYb0xKQy1EUmxRUjlFd2MxTFdzUXgza1JVWWlhVi10bHFhNGxLd1NwZWFMakU4UFk0em5vQTJxNFpEX0tXcFBQU0VwOUhDb0w5X0dBQkFwSTl2MVJmWHJWeVpUMHNUbEFzWkxSdzRpcG03VVFZeFdtSThMRHFEQ1VqV2RaTVNuX19uT2ZWNVJIbDZyN3NqZ09kS1hzMEY1RENoT0lCOWJMNDdtVzVqUjhEU2lfTTRnNmJDOVMzdWVmbDk2TFRXNlVYT3BLQlQ5M3VWUWdBQjNyOWdSbGs3MUk5Z0kyVWpsWlp6N3IzZWZHckdYUzIyLWI2NUVQY3k2ZU5nNUVRTFFic3VLaXlMNzRlTURWNldBZmRJUGpOX050eEpGa25aUWNYM2tqU25uOHpjSHY1YTlwajEzQVRBUm5zaElYQWJrZTc0WUVDeDR0MHphaUxXQnhKOWdCSDBnNzdTa0taYXlLajEzZk1sZ25ILTZTX21XWmEyQzFGd01Nd3FVclRJUXRIcHpLVndVZG1HVjRMSkVTQ3J5RW81QWhpdGZGY2c5U213b2dubGJQaVNBYmRubVVsZUJkRUFVcjJNWVdXekZnamVZYzJCVE83TTJrYnZ2VktJQUZGeHBsWTVIeEdMUWx6Ml9CeVp2UTNfVmczaHpLTThlaDk2cGV6blI1TVFOOEM5a21pdzFCNmlPbUZxbjNfRmNDckZ4cVZBTmZqLWl3Rm5XVE9yTHRvbWUyRkhWQ0RsQVJZZW1UeWRDdUFqNXl1bF9Ydl9KaUI3a0tYRWFTYnVxNEhmWFU2d3lfTFl0TC12SWVrbmtUY2l5Qk5lV3UwSUFyLXFSUmhlc0l4TEE4Si04bFBfWFd6OTdQanV6YlVlam9CYjNvT2tCVy05R0pzbDlfSWFxNWdlRmxVWGNPM0kyYnhOaHJhNDJlT2s4WkxsallDS0hxRFZjUGR0ZjNMS3JtaEtOV1ZNZndqMEEzMEF3SU10Rlotc2Mzd2x2VHdFVkRQMmlFNlN2bXA1T2MtSi0yM05qM2xvYkcyVzJadXpGX21ZN3I0SDh1blhKaUlZSG83NDlYcF83c0JCWi1oNlBTWlpxSEU3UmJJWUIwei1raVFZdFBVeHZmWFUxVVJVMkFfOVFQdkd3Sm9kOG5uVGhxNERUTTR4QkJTMHVpR3Y4OUZKcldLakE4eVJhdVFhaklPSFhSdE5CT1dSazdNNjdpVVVpdm5RcW1PZUdUNnRteVRCeGdzSlF0bzFXUHZVa0hRMHZFRkhNRFk4IiwiaXYiOiJVVEprOFpuNnNlRUotcE9jIiwiY2lwaGVydGV4dCI6IlF6VHVldnNuS3hyaGxXNG9lbWhQOFhWVnZHZ3F1bTZsX0RNMlp1N1NGZGhvSlhOTjY2QVlweWZVWWciLCJ0YWciOiIyYWdCeFRpVHJDeXFxbE16SS13VDNRIn0.8HbS9VhFvUWvUAZq.mv3XxHJHKfUSPX7JfQAe9Pr3FPkWfyTpx_6o6K5zLMWGeu2sZkpFJSd_N1IFZ8ARJYDPLg9U1y9GdY5EFHlWeL4ZMvxgk7-TLlkZ3EYLG7H4CVLrtx0dA9OofSQ9.1TEEQb__nOHOlywHYjyFlw"
+  },
+  "provenance": {
+    "sourceUrls": [
+      "https://github.com/Global-DataCare/gdc-sdk-node-ts/blob/main/src/node-managed-wallet.ts",
+      "https://github.com/Global-DataCare/gdc-sdk-node-ts/blob/main/src/server-profile-session.ts",
+      "https://github.com/Global-DataCare/gdc-common-utils-ts/blob/main/src/CryptographyService.ts"
+    ],
+    "nodeRuntime": "v26.13.0",
+    "applicationLockSha256": "34a0aab25e96b164f4a789b817e7baddc8f61481534e8fc3f13404cbdac600f1",
+    "publishedPackages": [
+      {
+        "name": "gdc-sdk-node-ts",
+        "version": "2.9.32",
+        "registryTarball": "https://registry.npmjs.org/gdc-sdk-node-ts/-/gdc-sdk-node-ts-2.9.32.tgz",
+        "integrity": "sha512-MlEOJmlBgJnr5Ns8mBkvDwDg42Kd2B/+FyrVvMB5o0XbgEV+vCQovfckhj+N84l34woYCatxHP70tG+c3vAGsg==",
+        "gitHead": null,
+        "manifestSha256": "9aacdc8ce6d6c92d86e0c453375c11d42d57474bc30ec7a553928c6dc4300922",
+        "modules": {
+          "package.json": "9aacdc8ce6d6c92d86e0c453375c11d42d57474bc30ec7a553928c6dc4300922",
+          "dist/node-managed-wallet.js": "9e3a15b72e011c199b1fa97b698c293604ebda188f269351d679ccdf8f8a0fb2",
+          "dist/node-crypto-helper.js": "04f5e66996f3df272d161a621b3e0f58c418336fdb5311122d2c419a2a868551"
+        }
+      },
+      {
+        "name": "gdc-common-utils-ts",
+        "version": "2.9.30",
+        "registryTarball": "https://registry.npmjs.org/gdc-common-utils-ts/-/gdc-common-utils-ts-2.9.30.tgz",
+        "integrity": "sha512-+ZJLEp/AfmCm4ZwJRU5wKTmWJPevlJ8Wa82EepyoGz0BE3sKBA2JjVbh4ML5+e+RIzstwoJnk4vWE4E44UhTqg==",
+        "gitHead": null,
+        "manifestSha256": "3c0b72c32ab14b3a5b48b342b211351654060099b91bc27841842e9730dc204d",
+        "modules": {
+          "package.json": "3c0b72c32ab14b3a5b48b342b211351654060099b91bc27841842e9730dc204d",
+          "dist/CryptographyService.js": "f3335f9f699eb5c57829d00eddd713ccd9dba1b9136ce3e2cc0e62664b1b0af3",
+          "dist/utils/jwt.js": "ffd7babbdbe6a6285c6f4a50921294cc06ab77d75dbbfed086fb18131ac3f134",
+          "dist/utils/content.js": "173fee2bf72dda36b8ce6dd79cc5e8592f0749cd97b6719d1b391a5bd4a8cc30",
+          "dist/utils/base-convert.js": "06ed2507c59ae1c19751d351318d199900eaecdf39936670fe3c8eaaf0772121",
+          "dist/utils/baseN.js": "c1332bef01746c23f340eedfdff21bdf64539b24f73cd61d27c93ef7b1ec0fa7",
+          "dist/utils/string-convert.js": "656db9bcad2a0e7671c8b7c21c7713394dcbf0ec761ba2cfd766e9cc080f1c5d",
+          "dist/utils/object-convert.js": "47125187a6909c2a1d4cb5182ffc06664371210487bc832d9829627f3b102383",
+          "dist/utils/string-utils.js": "664e5de53b8622ab69a1486156230d4aeb339781e7990d55e879a604051bee2e",
+          "dist/AesManager.js": "a3c022c7ac2c31c0ddcb8bcc44cd68d102500994f0eef6996094a02e4ba9b9c3"
+        }
+      }
+    ]
+  }
+}
