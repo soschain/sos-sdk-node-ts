@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Compose registered individual-controller custody, encrypted subject discovery
+  and verified SMART selection in one host-only access use case. Keep normal
+  runtime ES384 client assertions distinct from actor/VP signing, and bind
+  sealed clinical grants to the unchanged provider, profile and session.
+
 - Rewrap authorized profile PINs while atomically revoking every host-configured
   owner/profile session family. Validate historical stored key subsets by full
   public material without fabricating keys or granting strict registered custody.

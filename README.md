@@ -41,6 +41,8 @@ in [`docs/SERVER_PROFILE_CUSTODY_KEYS.md`](docs/SERVER_PROFILE_CUSTODY_KEYS.md)
 and [`docs/SERVER_PROFILE_PROTECTION.md`](docs/SERVER_PROFILE_PROTECTION.md).
 For transactional custody sessions and authorized PIN rewrap, see
 [`docs/REGISTERED_PROFILE_SESSIONS.md`](docs/REGISTERED_PROFILE_SESSIONS.md).
+For registered individual-controller discovery and SMART subject selection, see
+[`docs/REGISTERED_PROFILE_ACCESS.md`](docs/REGISTERED_PROFILE_ACCESS.md).
 
 ## BFF-owned synthetic Demo exchange
 

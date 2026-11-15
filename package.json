@@ -120,6 +120,10 @@
       "types": "./dist/subject-card-provider-catalog-client.d.ts",
       "default": "./dist/subject-card-provider-catalog-client.js"
     },
+    "./registered-profile-access": {
+      "types": "./dist/registered-profile-access.d.ts",
+      "default": "./dist/registered-profile-access.js"
+    },
     "./portal-consent-vault": {
       "types": "./dist/portal-consent-vault.d.ts",
       "default": "./dist/portal-consent-vault.js"

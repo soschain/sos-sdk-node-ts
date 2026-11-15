@@ -1,0 +1,68 @@
+# Registered profile access
+
+`RegisteredProfileAccess` composes the existing transactional custody sessions,
+registered communication wallet and configured-gateway signature verification.
+It supports listing individual-controller profile metadata, actor unlock and
+resolution, encrypted subject discovery, SMART subject selection, clinical
+session resolution and lock. It does not enroll actors or replace the complete
+profile-management facade.
+
+The trusted host supplies the authenticated account, provider and route, fresh
+OIDC token and contact verified from that account. These inputs must not come
+from browser authority claims. The configured provider selects recipient and
+response-signing keys; decrypted fields never select a trusted key resolver.
+The current use case admits registered individual-controller self/controller
+profiles. Employee presentation and other actor admission are separate work.
+
+Directory discovery executes the existing Organization and accepted-License
+queries through an explicit encrypted exchange port. The default directory
+client retains its existing plaintext contract for existing callers. Registered
+discovery validates each returned Organization UUID, canonical private subject
+DID and public alias using SOS Data's identity reader. A discovered assignment
+is not a clinical grant. Refresh atomically replaces the directory snapshot and
+clears previous selected-subject, attester, scopes and sealed token state while
+persisting the same confirmed aliases in the profile in that transaction.
+Role-code tails retain their relationship semantics: ONESELF is self, RESPRSN
+is controller and other assignments are member. A returned real RelatedPerson
+identifier becomes a FHIR personal attester, independently for each card.
+
+Selection requires an exact alias in that session's latest directory. Its
+provider-confirmed canonical subject is used in SMART Composition scopes. The
+normal runtime `openid-id-token-signing` ES384 key signs `private_key_jwt` with
+the stored DCR client as `iss` and `sub`, exact SMART endpoint as `aud`, current
+`iat`, a five-minute `exp` and fresh `jti`. It is a distinct capability from
+actor and VP signing; their existing client-bound methods remain unchanged.
+
+The configured gateway signature, envelope issuer/audience/thread, access JWT
+issuer/audience/actor/operation/time, granted scopes and response patient all
+must match. The access JWT `sub` is the actor; the separately bound response
+patient is the selected canonical subject. Missing granted scopes never fall
+back to requested scopes. Only Composition read/read-search scopes are
+supported here; narrower sections are retained and foreign/extra grants fail.
+
+Tokens are sealed under `<sessionId>:access-token`. Network and cryptographic
+work happens before a transaction that rechecks exact profile and session
+snapshots, credential revision and session expiry. A concurrent lock, PIN
+rewrap, refresh or selection cannot commit stale authority or resurrect a
+session. Clinical-token expiry denies clinical resolution while preserving a
+still-live actor session for fresh authorization. Normal actor lock revokes
+both uses by deleting the same session.
+
+Actor and clinical results include a secret-free profile view and actual
+registered encrypted transport and compact-document capabilities. Clinical
+profile views overlay the selected card's effective actor mode and attester;
+they never reuse a base profile's relationship for a different card. Pack
+binds the stored actor and DCR client, and unpack verifies configured-gateway
+signature, response issuer/audience and a thread opened by that adapter.
+Capabilities recheck the unchanged profile/session before and after work;
+clinical capabilities also enforce the current grant expiry. No raw seed or
+private key is returned.
+
+The protocol suite uses real registered JWS/JWE bytes and independent
+verification through an injected synthetic HTTP peer. It proves SDK protocol
+and persistence behavior, not acceptance by an online gateway or a completed
+portal migration. Existing retained directory, custody and transport suites
+remain necessary. The original orchestration evidence is available at
+[ServerProfileSessionManager](https://github.com/Global-DataCare/gdc-sdk-node-ts/blob/main/src/server-profile-session-manager.ts)
+and [ServerProfileSession](https://github.com/Global-DataCare/gdc-sdk-node-ts/blob/main/src/server-profile-session.ts).
+These are source references only; this package imports no historical runtime.

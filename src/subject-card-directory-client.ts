@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import {readIndividualOrganizationIdentity} from 'sos-data-utils-ts/individual-registration-contract'
 
 import {
   migrateHistoricalAnimalCardDidWeb,
@@ -35,6 +36,8 @@ export type AuthorizedIndividualSubjectDirectoryInput = Readonly<{
   verifiedContact: AuthorizedSubjectVerifiedContact
   requestThid?: string
   pollOptions?: Readonly<{ timeoutMs?: number; intervalMs?: number }>
+  /** Trusted registered provider, enabling strict row UUID/canonical subject binding. */
+  expectedProviderDid?: string
 }>
 
 export type AuthorizedIndividualSubject = Readonly<{
@@ -58,6 +61,8 @@ export type SosGatewaySubjectDirectoryClientOptions = Readonly<{
   defaultHeaders?: Readonly<Record<string, string>>
   requestTimeoutMs?: number
   fetchImpl?: typeof fetch
+  /** Explicit encrypted registered transport. No plaintext fallback is attempted. */
+  registeredExchange?: (path:string,payload:Readonly<Record<string,unknown>> & Readonly<{thid:string}>,options?:Readonly<{timeoutMs?:number;intervalMs?:number}>)=>Promise<Readonly<{status:number;body:unknown}>>
 }>
 
 type GatewayResponse = Readonly<{ status: number; body: unknown }>
@@ -82,7 +87,7 @@ export class SosGatewaySubjectDirectoryClient {
   private readonly requestTimeoutMs: number
   private readonly fetchImpl: typeof fetch
 
-  public constructor(options: SosGatewaySubjectDirectoryClientOptions) {
+  public constructor(private readonly options: SosGatewaySubjectDirectoryClientOptions) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl)
     this.requestTimeoutMs = positiveInteger(options.requestTimeoutMs ?? 15_000, 'request_timeout_invalid')
     this.fetchImpl = options.fetchImpl ?? fetch
@@ -127,7 +132,17 @@ export class SosGatewaySubjectDirectoryClient {
       },
       input.pollOptions,
     )
-    const ownedSubjects = readOwnedSubjects(ownerResult.body, context, { email, telephone })
+    const ownedSubjects = readOwnedSubjects(ownerResult.body, context, { email, telephone },input.expectedProviderDid)
+    if(input.expectedProviderDid){
+      const patientsByAlias=new Map<string,unknown>()
+      for(const subject of ownedSubjects){
+        const patient=subject.subjectClaims['org.schema.Organization.did']
+        for(const alias of publicAliases(subject.subjectClaims[CLAIM_ORGANIZATION_SAME_AS]).filter(value=>registeredAlias(value,input.expectedProviderDid!))){
+          if(patientsByAlias.has(alias)&&patientsByAlias.get(alias)!==patient)throw new Error('registered_directory_alias_ambiguous')
+          patientsByAlias.set(alias,patient)
+        }
+      }
+    }
     const subjectsByDid = new Map(ownedSubjects.map((subject) => [subject.subjectDid, subject]))
 
     const licensePath = gatewayPath(context, 'License', '_search')
@@ -154,7 +169,7 @@ export class SosGatewaySubjectDirectoryClient {
       },
       input.pollOptions,
     )
-    const licenses = readAcceptedLicenses(licenseResult.body, context)
+    const licenses = readAcceptedLicenses(licenseResult.body, context,input.expectedProviderDid)
 
     for (const license of licenses) {
       if (subjectsByDid.has(license.subjectDid)) continue
@@ -172,7 +187,8 @@ export class SosGatewaySubjectDirectoryClient {
       )
       const organization = readFirstOrganization(organizationResult.body)
       if (!publicAliases(organization.claims[CLAIM_ORGANIZATION_SAME_AS]).includes(license.subjectDid)) continue
-      const resolvedDid = resolveSubjectCardDid(license.subjectDid, context, organization.claims)
+      if(input.expectedProviderDid)assertRegisteredSubject(organization.claims,organization.organizationId,license.subjectDid,input.expectedProviderDid)
+      const resolvedDid:Readonly<{subjectDid:string;sourceSubjectDid?:string}> = input.expectedProviderDid?{subjectDid:license.subjectDid}:resolveSubjectCardDid(license.subjectDid, context, organization.claims)
       subjectsByDid.set(resolvedDid.subjectDid, Object.freeze({
         subjectDid: resolvedDid.subjectDid,
         ...(resolvedDid.sourceSubjectDid ? { sourceSubjectDid: resolvedDid.sourceSubjectDid } : {}),
@@ -194,6 +210,7 @@ export class SosGatewaySubjectDirectoryClient {
     payload: Readonly<Record<string, unknown>> & Readonly<{ thid: string }>,
     options?: Readonly<{ timeoutMs?: number; intervalMs?: number }>,
   ): Promise<GatewayResponse> {
+    if(this.options.registeredExchange)return this.options.registeredExchange(submitPath,payload,options)
     const submit = await this.post(submitPath, payload)
     requireSuccessfulResponse(submit, 'gateway_submit_failed')
     const timeoutMs = positiveInteger(options?.timeoutMs ?? 30_000, 'poll_timeout_invalid')
@@ -240,10 +257,19 @@ function searchBundle(type: string, claims: Readonly<Record<string, unknown>>): 
   }
 }
 
+function registeredAlias(value:string,provider:string):boolean{
+  return value.startsWith(`${provider}:card:`)&&!/[\s?#]/u.test(value)&&value.length>provider.length+6
+}
+function assertRegisteredSubject(claims:Readonly<Record<string,unknown>>,id:unknown,alias:string,provider:string):void{
+  if(!registeredAlias(alias,provider))throw new Error('registered_directory_subject_binding_invalid')
+  readIndividualOrganizationIdentity({organizationId:id,providerDid:provider,canonicalSubjectIdentifier:claims['org.schema.Organization.did'],publicCardAlias:alias})
+}
+
 function readOwnedSubjects(
   body: unknown,
   context: SosGatewayRouteContext,
   verified: Readonly<{ email: string; telephone: string }>,
+  expectedProviderDid?:string,
 ): AuthorizedIndividualSubject[] {
   const resources = readData(body).flatMap((entry: any) =>
     entry?.resource?.resourceType === 'Bundle' && Array.isArray(entry.resource.entry)
@@ -254,9 +280,10 @@ function readOwnedSubjects(
     const ownerEmail = String(claims[CLAIM_ORGANIZATION_OWNER_EMAIL] || '').trim().toLowerCase()
     const ownerTelephone = String(claims[CLAIM_ORGANIZATION_OWNER_TELEPHONE] || '').trim()
     if (!((verified.email && ownerEmail === verified.email) || (verified.telephone && ownerTelephone === verified.telephone))) return []
-    const sourceSubjectDid = selectSubjectCardAlias(claims[CLAIM_ORGANIZATION_SAME_AS], context)
+    const sourceSubjectDid = expectedProviderDid?publicAliases(claims[CLAIM_ORGANIZATION_SAME_AS]).find(alias=>registeredAlias(alias,expectedProviderDid)):selectSubjectCardAlias(claims[CLAIM_ORGANIZATION_SAME_AS], context)
     if (!sourceSubjectDid) return []
-    const resolvedDid = resolveSubjectCardDid(sourceSubjectDid, context, claims)
+    if(expectedProviderDid)assertRegisteredSubject(claims,resource.id,sourceSubjectDid,expectedProviderDid)
+    const resolvedDid:Readonly<{subjectDid:string;sourceSubjectDid?:string}> = expectedProviderDid?{subjectDid:sourceSubjectDid}:resolveSubjectCardDid(sourceSubjectDid, context, claims)
     const role = isAnimalSector(context.sector)
       ? 'RESPRSN'
       : String(claims[CLAIM_ORGANIZATION_MEMBER_ROLE] || '').trim()
@@ -273,14 +300,14 @@ function readOwnedSubjects(
   })
 }
 
-function readAcceptedLicenses(body: unknown, context: SosGatewayRouteContext): AcceptedLicenseRow[] {
+function readAcceptedLicenses(body: unknown, context: SosGatewayRouteContext,expectedProviderDid?:string): AcceptedLicenseRow[] {
   const rows = (readData(body)[0] as any)?.resource?.data
   if (!Array.isArray(rows)) return []
   return rows.flatMap((row: any) => {
     const meta = objectRecord(row?.meta || row?.resource?.meta)
     const subjectDid = String(meta.authorizedSubjectDid || '').trim()
     if (!subjectDid) return []
-    if (!isSubjectCardCandidate(subjectDid, context)) return []
+    if (!(expectedProviderDid?registeredAlias(subjectDid,expectedProviderDid):isSubjectCardCandidate(subjectDid, context))) return []
     const claims = objectRecord(meta.claims)
     const relatedRoles = String(claims[CLAIM_RELATED_PERSON_ROLE] || '')
       .split(',').map((value) => value.trim().toUpperCase()).filter(Boolean)

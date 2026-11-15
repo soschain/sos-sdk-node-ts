@@ -155,6 +155,17 @@ export async function openServerProfileCustodyKeys(options:ServerProfileCustodyK
   const signature=sign('sha384',Buffer.from(signingInput,'ascii'),{key:vp.key,dsaEncoding:'ieee-p1363'}).toString('base64url')
   return `${signingInput}.${signature}`
  }
+ /** Registered SMART private_key_jwt assertion, using the runtime ID-token key. */
+ const signClientAssertion=async(input:Readonly<{clientId:string;audience:string;issuedAt:number;jti:string}>):Promise<string>=>{
+  if(binding.kind!=='registered')throw new Error('server_profile_assertion_registered_binding_required')
+  const {clientId,audience,issuedAt,jti}=input
+  if(typeof clientId!=='string'||!clientId||clientId.trim()!==clientId||typeof audience!=='string'||!audience||typeof jti!=='string'||!jti||!Number.isSafeInteger(issuedAt)||issuedAt<0)throw failure()
+  const header={typ:'JWT',alg:'ES384',kid:idToken.publicJwk.kid}
+  const claims={iss:clientId,sub:clientId,aud:audience,iat:issuedAt,exp:issuedAt+300,jti}
+  const encodedHeader=Buffer.from(JSON.stringify(header),'utf8').toString('base64url'),encodedPayload=Buffer.from(JSON.stringify(claims),'utf8').toString('base64url')
+  const signingInput=`${encodedHeader}.${encodedPayload}`
+  return `${signingInput}.${sign('sha384',Buffer.from(signingInput,'ascii'),{key:idToken.key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`
+ }
  // id, seed and binding are already snapshots of the opening inputs. Never
  // reread caller options here: logical row IDs do not select custody owners.
  const ownerBinding=createHash('sha256').update(`storage:profile:${id}`,'utf8').digest('base64url')
@@ -188,5 +199,5 @@ export async function openServerProfileCustodyKeys(options:ServerProfileCustodyK
    return {...metadata,content} as Omit<T,'jwe'|'content'>&{content:unknown}
   },
  })
- return Object.freeze({descriptors,publicJwks:Object.freeze(dcr.map(entry=>entry.publicJwk)),storagePublicJwk:descriptors[1]!.publicJwk,signActorJws:managed(actor,false),signVpJws:managed(vp,true),signActorDetachedJws,signIdentityPresentationJws,confidentialStorageAdapter})
+ return Object.freeze({descriptors,publicJwks:Object.freeze(dcr.map(entry=>entry.publicJwk)),storagePublicJwk:descriptors[1]!.publicJwk,signActorJws:managed(actor,false),signVpJws:managed(vp,true),signActorDetachedJws,signIdentityPresentationJws,signClientAssertion,confidentialStorageAdapter})
 }
