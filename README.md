@@ -35,6 +35,8 @@ Staff provisioning and recipient installation contracts are documented in
 [`docs/WORKFORCE_CLIENT.md`](docs/WORKFORCE_CLIENT.md).
 The shared pre-DCR transport below controller/employee admission is described in
 [`docs/DEVICE_ENROLLMENT.md`](docs/DEVICE_ENROLLMENT.md).
+Validated registered inventory, licence commerce and lifecycle transport are
+described in [`docs/WORKFORCE_ADMINISTRATION.md`](docs/WORKFORCE_ADMINISTRATION.md).
 Organization bootstrap response authentication and configured signing-key custody
 are documented in
 [`docs/ORGANIZATION_RESPONSE_AUTHENTICATION.md`](docs/ORGANIZATION_RESPONSE_AUTHENTICATION.md).

@@ -136,6 +136,9 @@ export async function openServerProfileCustodyKeys(options:ServerProfileCustodyK
   const signature=sign('sha384',Buffer.from(inputBytes,'utf8'),{key:entry.key,dsaEncoding:'ieee-p1363'}).toString('base64url')
   return `${inputBytes}.${signature}`
  }
+ // Controller presentations retain the profile actor purpose, never the runtime
+ // VP key. The same actual client_id binding remains required.
+ const signActorPresentationJws=managed(actor,true)
  /** Exact detached credential bytes; this operation never substitutes the VP key. */
  const signActorDetachedJws=async(input:Readonly<{payload:string|Uint8Array}>):Promise<string>=>{
   if(typeof input.payload!=='string'&&!(input.payload instanceof Uint8Array))throw new TypeError('server_profile_detached_payload_invalid')
@@ -199,5 +202,5 @@ export async function openServerProfileCustodyKeys(options:ServerProfileCustodyK
    return {...metadata,content} as Omit<T,'jwe'|'content'>&{content:unknown}
   },
  })
- return Object.freeze({descriptors,publicJwks:Object.freeze(dcr.map(entry=>entry.publicJwk)),storagePublicJwk:descriptors[1]!.publicJwk,signActorJws:managed(actor,false),signVpJws:managed(vp,true),signActorDetachedJws,signIdentityPresentationJws,signClientAssertion,confidentialStorageAdapter})
+ return Object.freeze({descriptors,publicJwks:Object.freeze(dcr.map(entry=>entry.publicJwk)),storagePublicJwk:descriptors[1]!.publicJwk,signActorJws:managed(actor,false),signActorPresentationJws,signVpJws:managed(vp,true),signActorDetachedJws,signIdentityPresentationJws,signClientAssertion,confidentialStorageAdapter})
 }

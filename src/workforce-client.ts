@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto'
 import {DeviceEnrollmentClient,DeviceEnrollmentSubmitError} from './device-enrollment-client.js'
 import {buildOrganizationEmployeeDidWeb,buildStableActorIdentifier,normalizeActorContact,normalizeUuid,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
-import {SchemaOrgPersonClaim as Person,SchemaOrgIndividualProductClaim as Product,SchemaOrgOfferClaim as Offer} from 'antifraud-data-utils-ts/schema-org-claims'
+import {SchemaOrgPersonClaim as Person,SchemaOrgIndividualProductClaim as Product,SchemaOrgOfferClaim as Offer,SchemaOrgOrganizationClaim as Organization,SchemaOrgOrderClaim as Order} from 'antifraud-data-utils-ts/schema-org-claims'
 import {getHealthcareRoleByClaim} from 'sos-data-utils-ts/healthcare-roles'
 import {GatewayResponseEntryTypes} from 'sos-data-utils-ts/gateway-response-contract'
 import type {AppInfo,PollOptions,RouteContext} from 'sos-data-utils-ts/gateway-transport-contract'
@@ -9,6 +9,9 @@ import type {EmployeeActivationGrant} from 'sos-data-utils-ts/employee-routing'
 import {employeeActivationGrantMatchesContact} from './employee-activation-grant.js'
 import {RegisteredGatewayTransport,gatewayResponseEntries,type VerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
 import type {ServerProfileKeyDescriptor} from './server-profile-custody-keys.js'
+import {IdentityAuthRequestFields} from 'sos-data-utils-ts/identity-auth-wire-contract'
+import type {OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-lifecycle-contract'
+import {projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
 
 type Row=Record<string,unknown>
 const record=(value:unknown):Row|undefined=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Row:undefined
@@ -20,6 +23,12 @@ function contactClaims(contact:ActorContactInput):Row{return {[contact.contactKi
 function sameContact(row:Row,contact:ActorContactInput):boolean{
  const value=claims(row)[contact.contactKind==='phone'?Person.Telephone:Person.Email]
  try{return typeof value==='string'&&buildStableActorIdentifier({...contact,contact:value})===buildStableActorIdentifier(contact)}catch{return false}
+}
+function confirmedTarget(value:unknown,id:string,error:string):Row{
+ const entries=gatewayResponseEntries(value)
+ const entry=entries[0],resource=record(entry?.resource)
+ if(entries.length!==1||!resource||resource.id!==id||!['200','201','204'].includes(String(record(entry?.response)?.status)))throw new Error(error)
+ return resource
 }
 export class WorkforceSubmitError extends Error{
  constructor(readonly status:number,readonly body:unknown){super(`workforce_gateway_failed:${status}`)}
@@ -33,8 +42,12 @@ type WorkforceClientBaseOptions=Readonly<{
  bearerToken:string;secureTransportAdapter:VerifiedGatewaySecureAdapter
  appInfo?:AppInfo;requestTimeoutMs?:number;fetchImpl?:typeof fetch;allowLoopbackRedirectUris?:boolean
 }>
+export type WorkforceHostRegistryOptions=Readonly<{
+ hostDid:string;jurisdiction:string;hostNetwork:'test'|'local-network'|'test-network'|'network'
+ responseIssuer:string;secureTransportAdapter:VerifiedGatewaySecureAdapter
+}>
 export type WorkforceClientOptions=WorkforceClientBaseOptions&(
- Readonly<{transportProfile:'registered-didcomm-encrypted';clientId:string;tenantIssuer:string}>
+ Readonly<{transportProfile:'registered-didcomm-encrypted';clientId:string;tenantIssuer:string;hostRegistry?:WorkforceHostRegistryOptions}>
  |Readonly<{transportProfile:'pre-dcr-didcomm-encrypted';clientId?:never;tenantIssuer?:never}>
 )
 
@@ -47,6 +60,9 @@ export type WorkforceClientOptions=WorkforceClientBaseOptions&(
 export class WorkforceClient{
  private readonly transport:RegisteredGatewayTransport
  private readonly prefix:string
+ private readonly administrationIdentity?:Readonly<{issuerDid:string;providerDid:string;tenantIssuer:string;clientId:string;dcrResponseIssuer:string;ctx:RouteContext}>
+ private readonly hostRegistry?:WorkforceHostRegistryOptions
+ private readonly hostTransport?:RegisteredGatewayTransport
  constructor(private readonly options:WorkforceClientOptions){
   const url=new URL(options.baseUrl)
   if(url.username||url.password||url.search||url.hash||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(url.hostname))))throw new TypeError('workforce_gateway_https_required')
@@ -60,10 +76,130 @@ export class WorkforceClient{
    ||options.secureTransportAdapter?.gatewayDid!==options.gatewayDid)throw new TypeError('workforce_trusted_context_required')
   this.prefix=`/${encodeURIComponent(tenantId)}/cds-${encodeURIComponent(jurisdiction)}/v1/${encodeURIComponent(sector)}`
   this.transport=new RegisteredGatewayTransport({...options,baseUrl:url.href.replace(/\/+$/u,''),errorPrefix:'workforce',submitError:(status,body)=>new WorkforceSubmitError(status,body)})
+  if(options.transportProfile==='registered-didcomm-encrypted'){
+   this.administrationIdentity=Object.freeze({issuerDid:options.issuerDid,providerDid:options.providerDid,tenantIssuer:options.tenantIssuer,clientId:options.clientId,dcrResponseIssuer:options.dcrResponseIssuer,ctx:Object.freeze({...options.ctx})})
+   if(options.hostRegistry){
+    const host=options.hostRegistry
+    if(!text(host.hostDid).startsWith('did:web:')||!/^\p{L}{2}(?:-[A-Za-z0-9]{1,3})?$/u.test(host.jurisdiction)
+     ||!['test','local-network','test-network','network'].includes(host.hostNetwork)||!text(host.responseIssuer)
+     ||host.secureTransportAdapter?.gatewayDid!==host.hostDid)throw new TypeError('workforce_host_registry_context_invalid')
+    this.hostRegistry=Object.freeze({...host,secureTransportAdapter:Object.freeze({...host.secureTransportAdapter})})
+    this.hostTransport=new RegisteredGatewayTransport({...options,secureTransportAdapter:this.hostRegistry.secureTransportAdapter,baseUrl:url.href.replace(/\/+$/u,''),errorPrefix:'workforce',submitError:(status,body)=>new WorkforceSubmitError(status,body)})
+   }
+  }
  }
  private message(body:unknown,thread:string,registered:boolean,type='application/didcomm-plain+json'):Row{
   return {jti:randomUUID(),thid:thread,iss:this.options.issuerDid,aud:this.options.providerDid,type,body,
    ...(registered?{client_id:requireText(this.options.clientId,'workforce_registered_controller_client_required')}:{})}
+ }
+ private controller(){
+  if(!this.administrationIdentity)throw new Error('workforce_registered_controller_transport_required')
+  return this.administrationIdentity
+ }
+ private administrationMessage(body:unknown,thread:string,audience?:string):Row{
+  const identity=this.controller()
+  return {jti:randomUUID(),thid:thread,iss:identity.issuerDid,aud:audience??identity.providerDid,client_id:identity.clientId,type:'application/didcomm-plain+json',body}
+ }
+ private registry(){
+  this.controller()
+  if(!this.hostRegistry||!this.hostTransport)throw new Error('workforce_host_registry_context_required')
+  const prefix='/host/cds-'+encodeURIComponent(this.hostRegistry.jurisdiction)+'/v1/'+encodeURIComponent(this.hostRegistry.hostNetwork)+'/registry/org.schema'
+  return {configuration:this.hostRegistry,transport:this.hostTransport,prefix}
+ }
+ /** Authenticated directory envelopes become typed contacts and exact seat/device projections. */
+ async getAdministration(pollOptions?:PollOptions){
+  const identity=this.controller()
+  const employees=await this.transport.exchange(this.prefix+'/entity/org.schema/Employee/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
+   request:{method:'POST',url:'Employee/_search'},resource:{resourceType:'Parameters',parameter:[]},
+  }]},'workforce-employees-'+randomUUID()),identity.tenantIssuer,pollOptions)
+  const licenses=await this.transport.exchange(this.prefix+'/entity/org.schema/License/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
+   type:'License-search-request-v1.0',request:{method:'POST'},meta:{},resource:{meta:{claims:{'@context':'org.schema','@type':'IndividualProduct:Search'}}},
+  }]},'workforce-licenses-'+randomUUID()),identity.providerDid,pollOptions)
+  return {...projectWorkforceAdministration(employees.poll.body,licenses.poll.body,identity.providerDid),evidence:{employees,licenses}}
+ }
+ async changeEmployee(input:Readonly<{action:'disable'|'reactivate'|'purge';resourceId:string;employeeClaims:Readonly<Row>}>,pollOptions?:PollOptions){
+  const identity=this.controller(),resourceId=requireText(input.resourceId,'workforce_employee_resource_required')
+  if(resourceId==='*'||/[\s/?#*]/u.test(resourceId)||!['disable','reactivate','purge'].includes(input.action))throw new TypeError('workforce_employee_selector_invalid')
+  const employeeClaims=record(input.employeeClaims)
+  if(!employeeClaims||(employeeClaims[Person.MemberOfTaxId]!==undefined&&employeeClaims[Person.MemberOfTaxId]!==identity.ctx.tenantId))throw new TypeError('workforce_employee_tenant_binding_invalid')
+  const type=input.action==='disable'?'Employee-disable-request-v1.0':input.action==='reactivate'?'Employee-create-request-v1.0':'Employee-purge-request-v1.0'
+  const result=await this.transport.exchange(this.prefix+'/entity/org.schema/Employee/'+(input.action==='purge'?'_purge':'_batch'),this.administrationMessage({data:[{
+   type,request:{method:input.action==='disable'?'DELETE':'POST'},resource:{id:resourceId,type:'Person',meta:{claims:structuredClone(employeeClaims)}},
+  }]},'workforce-employee-'+input.action+'-'+randomUUID()),identity.tenantIssuer,pollOptions)
+  confirmedTarget(result.poll.body,resourceId,'workforce_employee_receipt_binding_invalid')
+  return {action:input.action,resourceId,result}
+ }
+ async revokeDevice(input:Readonly<{licenseId:string;clientId:string}>,pollOptions?:PollOptions){
+  const identity=this.controller(),licenseId=requireText(input.licenseId,'workforce_license_selector_required'),clientId=requireText(input.clientId,'workforce_device_selector_required')
+  if([licenseId,clientId].some(value=>value==='*'||/[\s/?#*]/u.test(value)))throw new TypeError('workforce_device_selector_invalid')
+  const result=await this.transport.exchange(this.prefix+'/identity/openid/Device/_revoke',this.administrationMessage({
+   [IdentityAuthRequestFields.LicenseId]:licenseId,[IdentityAuthRequestFields.ClientId]:clientId,
+  },'workforce-device-revoke-'+randomUUID()),identity.dcrResponseIssuer,pollOptions)
+  const resource=confirmedTarget(result.poll.body,clientId,'workforce_device_receipt_binding_invalid')
+  if(resource.resourceType!=='Device'||resource.status!=='revoked')throw new Error('workforce_device_receipt_binding_invalid')
+  return {clientId,status:'revoked' as const,result}
+ }
+ /** Request only: a commercial Offer never materializes seats until a separate confirmed Order. */
+ async requestEmployeeLicenseOffer(input:Readonly<{quantity:number}>,pollOptions?:PollOptions){
+  this.controller()
+  const host=this.registry()
+  if(!Number.isInteger(input.quantity)||input.quantity<1||input.quantity>100)throw new TypeError('workforce_license_quantity_invalid')
+  const result=await this.transport.exchange(this.prefix+'/entity/org.schema/Offer/_create',this.administrationMessage({resourceType:'Bundle',type:'batch',data:[{
+   type:'License-purchase-request-v1.0',request:{method:'POST'},meta:{},resource:{meta:{claims:{'@context':'org.schema','@type':'IndividualProduct:Purchase',
+    [Product.Category]:'professional',[Product.AdditionalType]:'web',[Offer.EligibleQuantityValue]:input.quantity,
+   }}},
+  }]},'workforce-license-offer-'+randomUUID()),host.configuration.responseIssuer,pollOptions)
+  const offers=gatewayResponseEntries(result.poll.body).flatMap(entry=>{
+   if(entry.type!==GatewayResponseEntryTypes.OrganizationLicenseOffer)return []
+   const resource=record(entry.resource),value=record(record(resource?.meta)?.claims)
+   return resource&&value&&text(value[Offer.Identifier])?[{resource,value}]:[]
+  })
+  if(offers.length!==1)throw new Error('workforce_license_offer_invalid')
+  const {resource,value}=offers[0]!,offerId=requireText(value[Offer.Identifier],'workforce_license_offer_invalid')
+  if(resource.id!==undefined&&resource.id!==offerId)throw new Error('workforce_license_offer_invalid')
+  const price=value[Offer.Price],priceCurrency=value[Offer.PriceCurrency],quantity=value[Offer.EligibleQuantityValue]
+  if(price!==undefined&&!((typeof price==='number'&&Number.isFinite(price)&&price>=0)||(typeof price==='string'&&/^[0-9]+(?:\.[0-9]{1,18})?$/u.test(price))))throw new Error('workforce_license_offer_invalid')
+  if(price===undefined||typeof priceCurrency!=='string'||!/^[A-Z][A-Z0-9]{2,11}$/u.test(priceCurrency)
+   ||typeof quantity!=='number'||!Number.isSafeInteger(quantity)||quantity!==input.quantity)throw new Error('workforce_license_offer_invalid')
+  return {offerId,offer:{id:offerId,price,priceCurrency,quantity,claims:Object.freeze(structuredClone(value))},result}
+ }
+ /** Domain caller supplies verified payment evidence; GW validates it. No _add or automatic payment exists here. */
+ async confirmLicenseOrder(input:Readonly<{offerId:string;additionalClaims:Readonly<Row>}>,pollOptions?:PollOptions){
+  const identity=this.controller(),host=this.registry(),offerId=requireText(input.offerId,'workforce_license_offer_required')
+  const additional=record(input.additionalClaims)
+  if(!additional)throw new TypeError('workforce_license_order_claims_invalid')
+  const contextualKey=Order.AcceptedOfferIdentifier.slice('org.schema.'.length)
+  if((additional[contextualKey]!==undefined&&additional[contextualKey]!==offerId)||(additional[Order.AcceptedOfferIdentifier]!==undefined&&additional[Order.AcceptedOfferIdentifier]!==offerId)
+   ||(additional['@context']!==undefined&&additional['@context']!=='org.schema'))throw new TypeError('workforce_license_order_offer_binding_invalid')
+  const result=await host.transport.exchange(host.prefix+'/Order/_batch',this.administrationMessage({data:[{type:'Organization-order-request-v1.0',resource:{meta:{claims:{
+   ...structuredClone(additional),'@context':'org.schema',[contextualKey]:offerId,
+  }}}}]},'workforce-license-order-'+randomUUID(),host.configuration.hostDid),host.configuration.responseIssuer,pollOptions)
+  const entries=gatewayResponseEntries(result.poll.body).filter(entry=>entry.type===GatewayResponseEntryTypes.OrganizationOrder)
+  if(entries.length!==1)throw new Error('workforce_license_order_receipt_invalid')
+  const value=claims(entries[0]!)
+  if(value[Order.AcceptedOfferIdentifier]!==offerId&&value[contextualKey]!==offerId)throw new Error('workforce_license_order_receipt_invalid')
+  return {offerId,receipt:{type:GatewayResponseEntryTypes.OrganizationOrder,claims:Object.freeze(structuredClone(value))},result}
+ }
+ /** Host registry target is explicit and separate from the immutable tenant provider. */
+ async organizationLifecycle(input:Readonly<{action:'status'|'disable'|'enable'|'purge'}>,pollOptions?:PollOptions){
+  const identity=this.controller(),host=this.registry()
+  if(!['status','disable','enable','purge'].includes(input.action))throw new TypeError('workforce_organization_action_invalid')
+  const action=input.action,requestType=action==='status'?'Organization-lifecycle-status-request-v1.0':action==='disable'?'Organization-disable-request-v1.0':action==='enable'?'Organization-enable-request-v1.0':'Organization-purge-request-v1.0'
+  const thread='workforce-organization-'+action+'-'+randomUUID()
+  const result=await host.transport.exchange(host.prefix+'/Organization/_'+action,this.administrationMessage({data:[{type:requestType,request:{method:'POST'},resource:{type:'Organization',meta:{claims:{
+   [Organization.IdentifierValue]:identity.ctx.tenantId,[Organization.SameAs]:identity.providerDid,
+  }}}}]},thread,host.configuration.hostDid),host.configuration.responseIssuer,pollOptions)
+  if(action==='purge'){
+   const purgeReceipt:OrganizationPurgeReceipt=readOrganizationPurgeReceipt(result.poll.body,{organizationIdentifier:identity.ctx.tenantId,providerDid:identity.providerDid,actorDid:identity.issuerDid,operationReference:thread})
+   return {action:'purge' as const,purgeReceipt,result}
+  }
+  if(action!=='status')requireOrganizationTransition(result.poll.body,{organizationIdentifier:identity.ctx.tenantId,providerDid:identity.providerDid,actorDid:identity.issuerDid,status:action==='disable'?'suspended':'active'})
+  const confirmed=action==='status'?result:await host.transport.exchange(host.prefix+'/Organization/_status',this.administrationMessage({data:[{type:'Organization-lifecycle-status-request-v1.0',request:{method:'POST'},resource:{type:'Organization',meta:{claims:{
+   [Organization.IdentifierValue]:identity.ctx.tenantId,[Organization.SameAs]:identity.providerDid,
+  }}}}]},'workforce-organization-status-'+randomUUID(),host.configuration.hostDid),host.configuration.responseIssuer,pollOptions)
+  const snapshot=readOrganizationLifecycleSnapshot(confirmed.poll.body,identity.ctx.tenantId)
+  if(action!=='status'&&snapshot.status!==(action==='disable'?'suspended':'active'))throw new Error('workforce_organization_readback_invalid')
+  return {action,snapshot,result,confirmed,operationReference:action==='status'?undefined:thread}
  }
  async provisionEmployee(input:Readonly<{operationId:string;contact:ActorContactInput;role:string}>,pollOptions?:PollOptions){
   if(this.options.transportProfile!=='registered-didcomm-encrypted')throw new Error('workforce_registered_controller_transport_required')

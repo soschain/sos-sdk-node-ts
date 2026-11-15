@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add registered workforce inventory and lifecycle transport with validated
+  phone/email DTOs, exact seat/device selectors, explicit Offer/Order evidence,
+  and separately configured host-registry status/purge readback.
+
+- Support client-bound controller presentations with the existing profile actor
+  key and embedded own public JWK, preserving the distinct runtime VP purpose.
+
 - Share explicit encrypted pre-DCR Token/Device transport below domain admission
   for controller and employee enrollment. Preserve employee grant checks, exact
   key purposes, optional registration token and trusted reply bindings; snapshot
