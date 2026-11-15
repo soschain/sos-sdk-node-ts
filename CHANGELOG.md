@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Rewrap authorized profile PINs while atomically revoking every host-configured
+  owner/profile session family. Validate historical stored key subsets by full
+  public material without fabricating keys or granting strict registered custody.
+
 - Add separate fixed-purpose controller governance ML-DSA-65 detached signing
   and runtime ML-DSA-44 access-token signing, retaining derivation/key identities
   and wire profiles without changing normal profile keys or host authority.

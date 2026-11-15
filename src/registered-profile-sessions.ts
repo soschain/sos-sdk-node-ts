@@ -11,6 +11,8 @@ type StoredSession=RegisteredProfileSessionRecord&{id:string}
 export type RegisteredProfileSessionsOptions=Readonly<{
  vault:TransactionalVaultRepository
  collections:Readonly<{profiles:string;sessions:string}>
+ /** Host-configured session families sharing exact ownerId/profileId fields. */
+ additionalSessionCollections?:readonly string[]
  sealer:ServerProfileSealer
  now?:()=>Date
  sessionTtlSeconds?:number
@@ -45,12 +47,19 @@ function bounded(value:number|undefined,fallback:number,max:number):number{
  * access. It never rotates the registered seed or substitutes communication keys.
  */
 export class RegisteredProfileSessions{
+ private readonly sessionCollections:readonly string[]
  private readonly ttl:number
  private readonly maxFailures:number
  private readonly lockSeconds:number
  constructor(private readonly options:RegisteredProfileSessionsOptions){
   required(options.collections.profiles);required(options.collections.sessions)
   if(options.collections.profiles===options.collections.sessions)throw new TypeError('registered_profile_collections_must_differ')
+  const additional=options.additionalSessionCollections??[]
+  if(!Array.isArray(additional))throw new TypeError('registered_profile_session_collections_invalid')
+  const sessions=[options.collections.sessions,...additional.map(value=>required(value))]
+  if(new Set(sessions).size!==sessions.length||sessions.includes(options.collections.profiles))throw new TypeError('registered_profile_session_collections_invalid')
+  this.sessionCollections=Object.freeze(sessions)
+  this.options={...options,collections:Object.freeze({...options.collections})}
   this.ttl=bounded(options.sessionTtlSeconds,300,86400)
   this.maxFailures=bounded(options.maxFailedUnlocks,5,100)
   this.lockSeconds=bounded(options.lockSeconds,300,86400)
@@ -81,6 +90,31 @@ export class RegisteredProfileSessions{
   // migration; absence must not silently provision or register replacement keys.
   if(!profile.storagePublicJwk)throw new Error('registered_profile_storage_key_migration_required')
   return openServerProfileCustodyKeys({walletKeyDerivationId:profile.walletKeyDerivationId||profile.profileId,unlockedWalletSeed:seed,binding:{kind:'registered',publicJwks:profile.publicJwks,storagePublicJwk:profile.storagePublicJwk}})
+ }
+ /** PIN-only check: preserve historical stored subsets without publishing keys or returning registered capabilities. */
+ private async validatePinCustody(profile:StoredProfile,seed:string):Promise<void>{
+  const derived=await openServerProfileCustodyKeys({walletKeyDerivationId:profile.walletKeyDerivationId||profile.profileId,unlockedWalletSeed:seed,binding:{kind:'enrollment'}})
+  if(!Array.isArray(profile.publicJwks)||!profile.publicJwks.length)throw denied()
+  const ownPublic=(value:unknown):Record<string,unknown>=>{
+   if(!value||typeof value!=='object'||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw denied()
+   const result:Record<string,unknown>=Object.create(null)
+   for(const [name,descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))){if(!('value' in descriptor))throw denied();result[name]=descriptor.value}
+   if(['d','k','dBytes','privBytes','priv','privateKey','secretKeyBytes'].some(name=>name in result))throw denied()
+   return result
+  }
+  const match=(value:unknown,documentOnly=false):string=>{
+   const actual=ownPublic(value)
+   if(typeof actual.kid!=='string'||!actual.kid)throw denied()
+   const expected=derived.descriptors.find(descriptor=>descriptor.kid===actual.kid&&(!documentOnly||descriptor.purpose==='document-at-rest'))
+   if(!expected)throw denied()
+   const fields=expected.publicJwk.kty==='EC'?['kty','crv','x','y','kid']:expected.publicJwk.kty==='AKP'?['kty','alg','pub','kid']:['kty','crv','x','kid']
+   if(fields.some(name=>typeof actual[name]!=='string'||actual[name]!==expected.publicJwk[name]))throw denied()
+   for(const [name,requiredValue] of [['alg',expected.alg],['use',expected.use],['purpose',expected.purpose],['ownerScope',expected.ownerScope]])if(actual[name]!==undefined&&actual[name]!==requiredValue)throw denied()
+   return actual.kid
+  }
+  const kids=new Set<string>()
+  for(const key of profile.publicJwks){const kid=match(key);if(kids.has(kid))throw denied();kids.add(kid)}
+  if(profile.storagePublicJwk!==undefined)match(profile.storagePublicJwk,true)
  }
  async unlock(input:RegisteredProfileBinding&Readonly<{pin:string}>){
   const before=await this.profile(input);this.assertUnlocked(before)
@@ -146,17 +180,18 @@ export class RegisteredProfileSessions{
  /** Caller must first authorize recovery/passkey custody; possession alone is not authorization. */
  async replacePin(input:RegisteredProfileBinding&Readonly<{authorizedWalletSeed:string;authorizedVpToken?:string;newPin:string}>){
   const before=await this.profile(input)
-  await this.custody(before,input.authorizedWalletSeed)
+  await this.validatePinCustody(before,input.authorizedWalletSeed)
   if(before.protectedVpToken&&!input.authorizedVpToken)throw new Error('registered_profile_authorized_vp_required')
   const protectedWalletSeed=await protectServerProfileSecret(input.authorizedWalletSeed,input.newPin,`${before.profileId}:wallet-seed`,this.options.sealer,this.options.protection)
   const protectedVpToken=before.protectedVpToken?await protectServerProfileSecret(input.authorizedVpToken!,input.newPin,`${before.profileId}:vp-token`,this.options.sealer,this.options.protection):undefined
   return this.options.vault.runTransaction(async port=>{
    const current=await this.profile(input,port);unchanged(before,current)
-   const sessions=await port.query<StoredSession>(this.options.collections.sessions,{where:[{attribute:'ownerId',equals:input.ownerId},{attribute:'profileId',equals:input.profileId}]})
+   const groups=await Promise.all(this.sessionCollections.map(async collection=>({collection,rows:await port.query<{id:string;ownerId:string;profileId:string}>(collection,{where:[{attribute:'ownerId',equals:input.ownerId},{attribute:'profileId',equals:input.profileId}]})})))
+   for(const group of groups)for(const row of group.rows)if(row.ownerId!==input.ownerId||row.profileId!==input.profileId||typeof row.id!=='string'||!row.id)throw denied()
    const {lockedUntil:_locked,...rest}=current
    const updated={...rest,protectedWalletSeed,...(protectedVpToken?{protectedVpToken}:{}),failedUnlocks:0,credentialRevision:revision(current)+1,updatedAt:this.now().toISOString()}
    await port.put(this.options.collections.profiles,updated)
-   for(const session of sessions)await port.delete(this.options.collections.sessions,session.id)
+   for(const group of groups)for(const row of group.rows)await port.delete(group.collection,row.id)
    return updated
   })
  }

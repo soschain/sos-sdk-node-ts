@@ -10,8 +10,9 @@ collections, `ServerProfileSealer`, and authenticated account/profile/provider
 route binding. Collections select the deployment namespace. The runtime checks
 the binding against the stored profile before opening custody. It accepts only
 the stored registered public material through the existing six-purpose custody
-helper. Missing historical document-key metadata produces an explicit migration
-error; this API does not invent replacement keys or enrollment.
+helper for session opening. Missing historical document-key metadata produces
+an explicit session migration error. PIN-only rewrap has the narrower historical
+compatibility check described below; it creates no replacement keys or enrollment.
 
 `unlock` opens the original PIN-plus-host envelope and creates a short host-sealed
 session. `resolve` checks account, route, expiry and credential revision again,
@@ -29,10 +30,26 @@ After independently authorizing recovery or passkey custody, the host may call
 `replacePin` with the authorized original seed and any separately protected VP.
 The runtime verifies the existing public key material, rewraps the original
 seed using the original profile AAD, and atomically replaces the protected
-record and deletes its owned sessions. Cryptography runs outside the storage
+record and deletes its owned sessions. The factory may additionally configure
+`additionalSessionCollections` for other existing session families that carry
+the same `ownerId`/`profileId` fields. The runtime snapshots that list, rejects
+duplicate/profile collection aliases, reads every family before writing, and
+revokes only exact account/profile rows in the same rewrap transaction. Request
+fields cannot select collections; unrelated accounts/profiles are retained.
+Cryptography runs outside the storage
 transaction; a snapshot comparison inside it rejects a concurrent reassignment
 or rewrap. An optional credential revision invalidates stale sessions while
 historical records without a revision retain revision-zero interpretation.
+
+For PIN-only compatibility, historical profiles may retain a nonempty subset of
+known public keys and absent document-key metadata. Every stored key must match
+the deterministic public material, algorithm and any supplied purpose metadata;
+duplicate, unknown, private or forged key entries fail before rewriting custody.
+The stored subset and missing metadata remain unchanged. This check returns
+only the rewrapped profile record and never a registered transport, document
+adapter, signing capability or new grant. Normal session opening keeps its full
+registered-key requirements. Caller recovery authorization and one-use passkey
+grant consumption remain separate host responsibilities.
 
 This API covers persisted custody and session lifetime. Gateway enrollment,
 controller/employee admission, recipient acceptance, subject-directory selection,
