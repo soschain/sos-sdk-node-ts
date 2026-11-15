@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Coordinate controller recovery through owned share/ciphertext and atomic
+  generation ports. Preserve historical email record/AAD/code bytes, bind
+  phones separately, and return recovery codes without returning wallet seeds.
+  Reuse managed PIN preparation so a host can atomically join recovery/outbox
+  writes to exact-profile revocation in both configured session families.
+  Share configured Google KMS HTTP custody with a binary 32-byte recovery port
+  while retaining the existing UTF-8 profile-sealer behavior.
+
 - Add registered workforce inventory and lifecycle transport with validated
   phone/email DTOs, exact seat/device selectors, explicit Offer/Order evidence,
   and separately configured host-registry status/purge readback.

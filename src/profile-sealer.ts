@@ -1,5 +1,6 @@
 import {createCipheriv,createDecipheriv,randomBytes} from 'node:crypto'
 import type {ServerProfileSealer} from 'sos-sdk-core-ts/profile-sealer'
+import type {ProfileRecoveryKms} from './profile-recovery-service.js'
 export type {ServerProfileSealer} from 'sos-sdk-core-ts/profile-sealer'
 
 const AES_PREFIX='local-test-v1.'
@@ -31,10 +32,11 @@ export function createAesGcmProfileSealer(keyBytes:Uint8Array):ServerProfileSeal
  })
 }
 
-/** Raw symmetric KMS ciphertext/AAD adapter; runtime selection and IAM remain host responsibilities. */
-export function createGoogleKmsProfileSealer(options:Readonly<{
+type GoogleKmsOptions=Readonly<{
  keyName:string;accessToken?:()=>Promise<string>;fetchImpl?:typeof fetch;requestTimeoutMs?:number
-}>):ServerProfileSealer{
+}>
+/** Fixed configured key and workload custody shared by the string and recovery-byte ports. */
+function googleKms(options:GoogleKmsOptions){
  const {keyName}=options
  if(typeof keyName!=='string'||!/^projects\/[A-Za-z0-9][A-Za-z0-9._:-]*\/locations\/[A-Za-z0-9_-]+\/keyRings\/[A-Za-z0-9_-]+\/cryptoKeys\/[A-Za-z0-9_-]+$/u.test(keyName))throw new TypeError('profile_sealer_kms_key_name_invalid')
  const fetchImpl=options.fetchImpl??fetch,timeout=options.requestTimeoutMs??15000
@@ -60,6 +62,12 @@ export function createGoogleKmsProfileSealer(options:Readonly<{
   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error(`profile_sealer_kms_${operation}_invalid`)
   return value as Record<string,unknown>
  }
+ return Object.freeze({keyName,call})
+}
+
+/** Raw symmetric KMS ciphertext/AAD adapter; runtime selection and IAM remain host responsibilities. */
+export function createGoogleKmsProfileSealer(options:GoogleKmsOptions):ServerProfileSealer{
+ const {call}=googleKms(options)
  return Object.freeze({
   async seal(cleartext:string,aad:string){
    strings(cleartext,aad)
@@ -74,6 +82,28 @@ export function createGoogleKmsProfileSealer(options:Readonly<{
    const plaintext=Buffer.from(result.plaintext,'base64')
    if(plaintext.toString('base64')!==result.plaintext)throw new Error('profile_sealer_kms_decrypt_invalid')
    return new TextDecoder('utf-8',{fatal:true}).decode(plaintext)
+  },
+ })
+}
+
+/** Existing 32-byte recovery shares require a byte port, never UTF-8 conversion. */
+export function createGoogleKmsProfileRecovery(options:GoogleKmsOptions):ProfileRecoveryKms{
+ const {keyName,call}=googleKms(options)
+ return Object.freeze({
+  keyName,
+  async encrypt(cleartext:Uint8Array,aad:Uint8Array){
+   if(!(cleartext instanceof Uint8Array)||cleartext.byteLength!==32||!(aad instanceof Uint8Array))throw new TypeError('profile_recovery_kms_byte_input_invalid')
+   const result=await call('encrypt',{plaintext:Buffer.from(cleartext).toString('base64'),additionalAuthenticatedData:Buffer.from(aad).toString('base64')})
+   if(typeof result.ciphertext!=='string'||!result.ciphertext)throw new Error('profile_recovery_kms_encrypt_invalid')
+   return result.ciphertext
+  },
+  async decrypt(ciphertext:string,aad:Uint8Array){
+   if(typeof ciphertext!=='string'||!ciphertext||!(aad instanceof Uint8Array))throw new TypeError('profile_recovery_kms_byte_input_invalid')
+   const result=await call('decrypt',{ciphertext,additionalAuthenticatedData:Buffer.from(aad).toString('base64')})
+   if(typeof result.plaintext!=='string'||!result.plaintext)throw new Error('profile_recovery_kms_decrypt_invalid')
+   const plaintext=Buffer.from(result.plaintext,'base64')
+   if(plaintext.byteLength!==32||plaintext.toString('base64')!==result.plaintext)throw new Error('profile_recovery_kms_decrypt_invalid')
+   return Uint8Array.from(plaintext)
   },
  })
 }

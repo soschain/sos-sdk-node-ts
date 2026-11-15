@@ -1,4 +1,4 @@
-// Flow contract: preserve existing sealed profile ciphertext and UTF-8 AAD using a host-selected AES or Google KMS adapter, reject tampering/custody failures, and never choose a runtime, seed or replacement key. KMS tests cross real loopback HTTP with injected cloud transport; they do not claim live Google IAM/KMS verification.
+// Flow contract: preserve existing sealed profile ciphertext/UTF-8 AAD and raw recovery-share bytes with binary AAD using host-selected custody, reject tampering/custody failures, and never select an environment, seed or replacement key. KMS tests cross real loopback HTTP with injected cloud transport; they do not claim live Google IAM/KMS verification.
 import assert from 'node:assert/strict'
 import {createCipheriv,createDecipheriv,createHash} from 'node:crypto'
 import {createServer} from 'node:http'
@@ -85,4 +85,44 @@ test('rejects KMS or metadata failure and malformed successful responses without
  const sealer=createGoogleKmsProfileSealer({keyName,fetchImpl:async()=>{requests++;return Response.json({})}})
  await assert.rejects(sealer.seal(cleartext,aad));assert.equal(requests,1)
  assert.throws(()=>createGoogleKmsProfileSealer({keyName:`${keyName}?untrusted-route`}))
+})
+
+test('recovery KMS port preserves all 32 share bytes and binary AAD over actual HTTP without UTF-8 conversion',async()=>{
+ const {createGoogleKmsProfileRecovery}=await load()
+ const share=Uint8Array.from({length:32},(_,index)=>(index*37)&255),binding=Uint8Array.from([0,255,10,128]),seen=[]
+ const opaque=Buffer.from('synthetic opaque recovery ciphertext').toString('base64');let failure
+ const server=createServer(async(request,response)=>{
+  try{
+   const chunks=[];for await(const chunk of request)chunks.push(chunk)
+   const body=JSON.parse(Buffer.concat(chunks).toString());seen.push(request.url)
+   assert.equal(request.headers.authorization,'Bearer synthetic-workload-access-token')
+   assert.equal(body.additionalAuthenticatedData,Buffer.from(binding).toString('base64'))
+   response.writeHead(200,{'Content-Type':'application/json'})
+   if(request.url.endsWith(':encrypt')){assert.equal(body.plaintext,Buffer.from(share).toString('base64'));response.end(JSON.stringify({ciphertext:opaque}))}
+   else{assert.equal(body.ciphertext,opaque);response.end(JSON.stringify({plaintext:Buffer.from(share).toString('base64')}))}
+  }catch(error){failure=error;response.writeHead(500);response.end()}
+ })
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+ try{
+  const adapter=createGoogleKmsProfileRecovery({keyName,accessToken:async()=> 'synthetic-workload-access-token',fetchImpl:(url,init)=>{
+   assert.equal(new URL(url).origin,'https://cloudkms.googleapis.com')
+   return fetch(`http://127.0.0.1:${server.address().port}${new URL(url).pathname}`,init)
+  }})
+  assert.equal(adapter.keyName,keyName)
+  assert.equal(await adapter.encrypt(share,binding),opaque)
+  assert.deepEqual(await adapter.decrypt(opaque,binding),share)
+  assert.deepEqual(seen,[`/v1/${keyName}:encrypt`,`/v1/${keyName}:decrypt`]);assert.equal(failure,undefined)
+ }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve))}
+})
+
+test('recovery KMS rejects coerced or malformed shares and operational failures without a local fallback',async()=>{
+ const {createGoogleKmsProfileRecovery}=await load()
+ const share=new Uint8Array(32),binding=Uint8Array.from([1,2,3]);let requests=0
+ const adapter=createGoogleKmsProfileRecovery({keyName,accessToken:async()=> 'synthetic-workload-access-token',fetchImpl:async()=>{requests++;return new Response('',{status:403})}})
+ await assert.rejects(adapter.encrypt('synthetic-string',binding));await assert.rejects(adapter.encrypt(new Uint8Array(31),binding));assert.equal(requests,0)
+ await assert.rejects(adapter.encrypt(share,binding));assert.equal(requests,1)
+ for(const plaintext of ['!!!!',Buffer.alloc(31).toString('base64'),'',42]){
+  const malformed=createGoogleKmsProfileRecovery({keyName,accessToken:async()=> 'synthetic-workload-access-token',fetchImpl:async()=>Response.json({plaintext})})
+  await assert.rejects(malformed.decrypt('synthetic-ciphertext',binding))
+ }
 })

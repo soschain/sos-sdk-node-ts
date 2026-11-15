@@ -1,0 +1,34 @@
+{
+  "label": "newly captured synthetic historical published-runtime email recovery baseline",
+  "provenance": [
+    {
+      "package": "uhc-sdk-node-ts",
+      "version": "0.3.12",
+      "registryTarball": "https://registry.npmjs.org/uhc-sdk-node-ts/-/uhc-sdk-node-ts-0.3.12.tgz",
+      "integrity": "sha512-JDS3mue+M5+gsrQ3/6cWW0aB4SzJ0YYFebvG7YW4FLI0Rgdfn6e48JMyWGiPfGIGmut9P8ZjfexvHYaZlKum4Q==",
+      "moduleSha256": "ccf78f407f5f45a8436778aa70593b42f789f679bbc689815d9f1e02906103b4"
+    },
+    {
+      "package": "uhc-sdk-core-ts",
+      "version": "0.5.12",
+      "registryTarball": "https://registry.npmjs.org/uhc-sdk-core-ts/-/uhc-sdk-core-ts-0.5.12.tgz",
+      "integrity": "sha512-bnWxTFwgZP14XnCiANl5Sc/vBRpTRI+26kdvlcl4U0gwSQauqWzwEKcJyuyZ4lRVlRUShVxeI+PSVqJIKdy/iQ==",
+      "moduleSha256": "2cfc1fb93b790290c4b849a803f64e4345a336b352b5dbf3b10f994ae6593fc4"
+    }
+  ],
+  "seedFixture": "registered-communication-wallet.json",
+  "record": {
+    "version": "uhc-profile-recovery-v1",
+    "kmsKeyName": "synthetic://profile-recovery-key",
+    "encryptedServerShare": "MTExMTExMTExMTExeiuuMj9gDqzJywKoQSWi3vwplBHXq3p4bHZJEzz8JimY9RyZNezpesX59Y7H9Nca",
+    "seedFingerprint": "LYFWTq1-V9ImoQZBmiEaxOQe7fy98U3MH7qtkQs0Uys",
+    "generation": 1,
+    "createdAt": "2026-11-15T00:00:00.000Z"
+  },
+  "aadSha256": "f25a634b53c338a526443de8b2b4cd5e1b9d1755a1d8b7b1da47d69b345d50f3",
+  "recoveryCodeSha256": "6bc8188e0a00508a977c3023fc74c244b10687ccd3f21d6beab6b57672561ddf",
+  "replacementCodeSha256": "b445a901030b305a21b5737c0b54eccd4c13887537e1a5dd0ad13416ace0c88f",
+  "originalReadback": true,
+  "originalOneUseDenied": true,
+  "privateOutputs": false
+}
