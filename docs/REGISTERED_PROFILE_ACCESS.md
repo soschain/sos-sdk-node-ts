@@ -26,6 +26,15 @@ Role-code tails retain their relationship semantics: ONESELF is self, RESPRSN
 is controller and other assignments are member. A returned real RelatedPerson
 identifier becomes a FHIR personal attester, independently for each card.
 
+`readAuthorizedSubjects` returns the accepted directory array through the same
+signed query without writing the profile or session. It preserves a selected
+SMART subject, scopes and sealed token. Exact current profile/session snapshots
+and expiry are checked before the query and again before returning its result;
+a concurrent lock or change denies the read. Hosts must perform directory and
+custody awaits outside datastore transactions, then recheck their captured
+authority snapshot through the supplied transaction port when composing another
+operation. This read neither persists discoveries nor confers clinical access.
+
 Selection requires an exact alias in that session's latest directory. Its
 provider-confirmed canonical subject is used in SMART Composition scopes. The
 normal runtime `openid-id-token-signing` ES384 key signs `private_key_jwt` with

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Read the current signed authorized-subject directory without mutating profile
+  metadata or a selected SMART context; recheck the exact current actor session
+  before transport and before returning accepted subjects.
+
 - Add sealed controller-owned pending evidence with current transactional
   custody resolution, independent document slots, opaque protected downloads,
   immutable retries and exact-card reset/expiry cleanup. Reuse the same vault

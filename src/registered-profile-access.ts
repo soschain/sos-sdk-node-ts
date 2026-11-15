@@ -8,7 +8,7 @@ import {buildScopeSmartCompositionAccess} from 'sos-data-utils-ts/consent-smart-
 import {RegisteredProfileSessions,type RegisteredProfileSessionsOptions} from './registered-profile-sessions.js'
 import {RegisteredGatewayTransport,createVerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
 import {openRegisteredCommunicationWallet} from './registered-communication-wallet.js'
-import {SosGatewaySubjectDirectoryClient,type AuthorizedSubjectVerifiedContact} from './subject-card-directory-client.js'
+import {SosGatewaySubjectDirectoryClient,type AuthorizedIndividualSubject,type AuthorizedSubjectVerifiedContact} from './subject-card-directory-client.js'
 import type {RegisteredSmartTokenAlgorithm} from './registered-did-keys.js'
 
 export type RegisteredProfileAccessOptions=RegisteredProfileSessionsOptions&Readonly<{
@@ -177,13 +177,23 @@ export class RegisteredProfileAccess{
    if(updated)await port.put(this.options.collections.sessions,updated)
   })
  }
- async refreshAuthorizedSubjects(input:AuthInput&Readonly<{verifiedContact:AuthorizedSubjectVerifiedContact}>){
-  const opened=await this.opened(input),transport=await this.transport(input,opened)
+ private async queryAuthorizedSubjects(input:AuthInput&Readonly<{verifiedContact:AuthorizedSubjectVerifiedContact}>,opened:Opened){
+  const verifiedContact=structuredClone(input.verifiedContact),transport=await this.transport(input,opened)
+  await this.commit(opened)
   const directory=new SosGatewaySubjectDirectoryClient({baseUrl:this.baseUrl,registeredExchange:async(path,payload,poll)=>{
    const result=await transport.exchange(path,this.message(opened,record(payload.body),opened.profile.providerDid),this.options.gateway.responseIssuer,poll??this.options.pollOptions)
    return result.poll
   }})
-  const subjects=await directory.listAuthorizedIndividualSubjects(opened.profile.routeContext,{verifiedContact:input.verifiedContact,expectedProviderDid:opened.profile.providerDid,pollOptions:this.options.pollOptions})
+  return directory.listAuthorizedIndividualSubjects(opened.profile.routeContext,{verifiedContact,expectedProviderDid:opened.profile.providerDid,pollOptions:this.options.pollOptions})
+ }
+ /** Read the current signed directory without clearing a selected SMART context or persisting discoveries. */
+ async readAuthorizedSubjects(input:AuthInput&Readonly<{verifiedContact:AuthorizedSubjectVerifiedContact}>):Promise<readonly AuthorizedIndividualSubject[]>{
+  const opened=await this.opened(input),subjects=await this.queryAuthorizedSubjects(input,opened)
+  await this.commit(opened)
+  return subjects
+ }
+ async refreshAuthorizedSubjects(input:AuthInput&Readonly<{verifiedContact:AuthorizedSubjectVerifiedContact}>){
+  const opened=await this.opened(input),subjects=await this.queryAuthorizedSubjects(input,opened)
   const assignments:RegisteredProfileAuthorizedSubject[]=subjects.map(subject=>{
    const role=(subject.role??'').trim().toUpperCase().split(/[|/#:]/u).at(-1)
    let reference=subject.relatedPersonId

@@ -61,9 +61,9 @@ async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg}={}){
  const probe=await client.wallet.packForRecipientWithContext({iss:actorDid,aud:providerDid,thid:'synthetic-probe',client_id:clientId,body:{}},providerDid,{context:client.context})
  const openedProbe=await peer.unpackWithContext(probe,{context:peerContext})
  assert.equal(await crypto.verifyJws(openedProbe.meta.jws.compact,clientSigning),true)
- let now=1794614400000,fault='',gate,release,started
+ let now=1794614400000,fault='',gate,release,started,directoryGate,releaseDirectory,startedDirectory
  const requests=[],jobs=new Map()
- const state={requests,setFault:value=>{fault=value},advance:ms=>{now+=ms},holdSmart(){gate=new Promise(resolve=>{release=resolve});return new Promise(resolve=>{started=resolve})},releaseSmart(){release?.()}}
+ const state={requests,setFault:value=>{fault=value},advance:ms=>{now+=ms},holdSmart(){gate=new Promise(resolve=>{release=resolve});return new Promise(resolve=>{started=resolve})},releaseSmart(){release?.()},holdDirectory(){directoryGate=new Promise(resolve=>{releaseDirectory=resolve});return new Promise(resolve=>{startedDirectory=resolve})},releaseDirectory(){releaseDirectory?.()}}
  async function fetchImpl(url,options){
   assert.equal(options.method,'POST');assert.equal(options.headers.Authorization,`Bearer ${accountToken}`)
   assert.equal(options.headers['Content-Type'],'application/x-www-form-urlencoded')
@@ -133,6 +133,7 @@ async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg}={}){
    }
    body={data:[{resource:{resourceType:'Bundle',entry:entries}}]}
   }
+  if(!job.path.includes('/License/')&&job.path!==smartPath){startedDirectory?.();if(directoryGate)await directoryGate}
   const response={iss:fault==='provider'?`${providerDid}:foreign`:providerDid,aud:fault==='audience'?`${actorDid}:foreign`:actorDid,thid:fault==='thread'?'synthetic-other-thread':job.message.thid,body}
   const encrypted=await peer.packForRecipientWithContext(response,actorDid,{context:peerContext})
   return new Response(JSON.stringify({response:encrypted}),{status:200})
@@ -152,6 +153,37 @@ async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg}={}){
 }
 async function begin(t,options){const f=await fixture(t,options),{RegisteredProfileAccess}=await load(),access=new RegisteredProfileAccess(f.options);const actor=await access.unlockActorProfile({...binding,pin});return {...f,access,sessionId:actor.sessionId}}
 const request=(sessionId)=>({...binding,sessionId,idToken:accountToken})
+
+test('readAuthorizedSubjects accepts signed current directory rows without changing selected SMART context or profile metadata',async t=>{
+ const f=await begin(t)
+ await f.access.refreshAuthorizedSubjects({...request(f.sessionId),verifiedContact:{email:safe.firstContactEmail}})
+ await f.access.selectAuthorizedSubject({...request(f.sessionId),subjectDid:alias,scopes:[requestedScope]})
+ const beforeProfile=await f.vault.get(profiles,binding.profileId),beforeSession=await f.vault.get(sessions,f.sessionId)
+ assert.ok(beforeSession.sealedAccessToken);assert.equal(beforeSession.selectedSubjectDid,alias)
+ f.state.setFault('two-subjects')
+ const subjects=await f.access.readAuthorizedSubjects({...request(f.sessionId),verifiedContact:{email:safe.firstContactEmail}})
+ assert.deepEqual(subjects.map(subject=>subject.subjectDid).sort(),[alias,secondAlias].sort())
+ assert.deepEqual(await f.vault.get(profiles,binding.profileId),beforeProfile)
+ assert.deepEqual(await f.vault.get(sessions,f.sessionId),beforeSession)
+ assert.equal((await f.access.resolveSession({...binding,sessionId:f.sessionId})).selectedSubjectDid,alias)
+ f.state.setFault('provider')
+ await assert.rejects(f.access.readAuthorizedSubjects({...request(f.sessionId),verifiedContact:{email:safe.firstContactEmail}}))
+ assert.deepEqual(await f.vault.get(sessions,f.sessionId),beforeSession)
+})
+
+test('readAuthorizedSubjects denies a revoked lease during a real signed directory response without restoring session state',async t=>{
+ const f=await begin(t)
+ assert.equal(typeof f.access.readAuthorizedSubjects,'function')
+ const beforeProfile=await f.vault.get(profiles,binding.profileId),started=f.state.holdDirectory()
+ const pending=f.access.readAuthorizedSubjects({...request(f.sessionId),verifiedContact:{email:safe.firstContactEmail}})
+ await started
+ await f.access.lock(binding,f.sessionId)
+ const afterLock=await f.vault.get(sessions,f.sessionId)
+ f.state.releaseDirectory()
+ await assert.rejects(pending,/changed|revoked/u)
+ assert.deepEqual(await f.vault.get(profiles,binding.profileId),beforeProfile)
+ assert.deepEqual(await f.vault.get(sessions,f.sessionId),afterLock)
+})
 
 test('drives unlock, registered encrypted discovery, exact-key SMART selection and reset with bounded token lifetime',async t=>{
  const f=await begin(t)
