@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add purpose-separated registered actor detached credential signing and exact
+  identity-presentation VP signing while retaining strict client-bound APIs,
+  original public keys and caller-provided claim values.
+
 - Add registered-profile custody sessions over the transactional vault, retaining
   existing protected envelopes, AAD and registered keys. Bind account, profile
   and routed provider context; commit authenticated PIN failures separately

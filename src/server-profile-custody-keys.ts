@@ -113,5 +113,24 @@ export async function openServerProfileCustodyKeys(options:ServerProfileCustodyK
   const signature=sign('sha384',Buffer.from(inputBytes,'utf8'),{key:entry.key,dsaEncoding:'ieee-p1363'}).toString('base64url')
   return `${inputBytes}.${signature}`
  }
- return Object.freeze({descriptors,publicJwks:Object.freeze(dcr.map(entry=>entry.publicJwk)),storagePublicJwk:descriptors[1]!.publicJwk,signActorJws:managed(actor,false),signVpJws:managed(vp,true)})
+ /** Exact detached credential bytes; this operation never substitutes the VP key. */
+ const signActorDetachedJws=async(input:Readonly<{payload:string|Uint8Array}>):Promise<string>=>{
+  if(typeof input.payload!=='string'&&!(input.payload instanceof Uint8Array))throw new TypeError('server_profile_detached_payload_invalid')
+  const header={typ:'application/vc+ld+json',alg:'ES384',kid:actor.publicJwk.kid,b64:false,crit:['b64']}
+  const encodedHeader=Buffer.from(JSON.stringify(header),'utf8').toString('base64url')
+  const payload=typeof input.payload==='string'?Buffer.from(input.payload,'utf8'):Buffer.from(input.payload)
+  const signingBytes=Buffer.concat([Buffer.from(`${encodedHeader}.`,'ascii'),payload])
+  const signature=sign('sha384',signingBytes,{key:actor.key,dsaEncoding:'ieee-p1363'}).toString('base64url')
+  return `${encodedHeader}..${signature}`
+ }
+ /** Separate existing presentation profile; does not relax either client-bound API above. */
+ const signIdentityPresentationJws=async(input:Readonly<{claims:Readonly<Record<string,unknown>>}>):Promise<string>=>{
+  const claims=snapshot(own(input.claims))
+  const header={typ:'application/vp+jwt',alg:'ES384',kid:vp.publicJwk.kid}
+  const encodedHeader=Buffer.from(JSON.stringify(header),'utf8').toString('base64url'),encodedPayload=Buffer.from(JSON.stringify(claims),'utf8').toString('base64url')
+  const signingInput=`${encodedHeader}.${encodedPayload}`
+  const signature=sign('sha384',Buffer.from(signingInput,'ascii'),{key:vp.key,dsaEncoding:'ieee-p1363'}).toString('base64url')
+  return `${signingInput}.${signature}`
+ }
+ return Object.freeze({descriptors,publicJwks:Object.freeze(dcr.map(entry=>entry.publicJwk)),storagePublicJwk:descriptors[1]!.publicJwk,signActorJws:managed(actor,false),signVpJws:managed(vp,true),signActorDetachedJws,signIdentityPresentationJws})
 }
