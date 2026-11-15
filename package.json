@@ -1,6 +1,6 @@
 {
   "name": "sos-sdk-node-ts",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Product-neutral Node adapters shared by SOSChain, Vet and UHC runtimes",
   "license": "Apache-2.0",
   "author": "Connecting Solution & Applications Ltd",
@@ -150,8 +150,8 @@
     "express": "4.22.3",
     "fhir-data-utils-ts": "0.7.0",
     "livekit-server-sdk": "2.19.2",
-    "sos-data-utils-ts": "0.7.0",
-    "sos-sdk-core-ts": "0.6.0",
+    "sos-data-utils-ts": "0.8.0",
+    "sos-sdk-core-ts": "0.7.0",
     "tasks-core-node-ts": "0.1.3",
     "web-push": "4.0.0"
   },

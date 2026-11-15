@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-11-15
 
 - Accept device enrollment responses without an optional registration management
   token, matching the gateway's actual response. Reject malformed tokens when
