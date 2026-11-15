@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Expose the existing frozen registered-client transport profile through the
+  public SDK root, preserving the original form media value and implementation.
+
 - Preserve actual registered SMART r/rs/cruds grants and independently configured
   ES384, explicit ES256 or PQC token verification without weakening outer PQC
   transport. Select token keys from trusted provider authentication methods and
