@@ -6,6 +6,19 @@ profile, wallet session, configured tenant issuer and each selected target. The
 GW remains authoritative for controller, licence, role and lifecycle admission.
 Pre-DCR key possession enables none of these operations.
 
+`submitWorkflowAccess({resourceType, entries, operationId})` accepts only the
+existing Data-owned `OrganizationWorkflowFlatEntry` shape for Group or Consent.
+It submits fixed tenant FHIR routes and POST/PATCH relative resource selectors;
+it cannot address arbitrary managers or providers. The host still resolves the
+controller, employee Occupation and governed capabilities before building a plan,
+and saves local authorization only after terminal signed acknowledgements.
+
+Actual Group and Consent replies use the tenant provider issuer and original
+caller/thread. Group acknowledgements carry the requested Group ID; the current
+Consent acknowledgement is bare `Consent` without a returned resource ID. The
+client validates those actual shapes and never manufactures an ID or treats a
+Group membership alone as Consent authority.
+
 `getAdministration` submits fixed Employee and Licence searches, then validates
 the response claims into the Data-owned contact union and seven numeric licence
 totals. Phone rows contain `telephone`, without an invented email. Both existing

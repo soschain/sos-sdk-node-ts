@@ -8,6 +8,7 @@ import {SchemaOrgPersonClaim as Person,SchemaOrgOfferClaim as Offer,SchemaOrgOrg
 import {REPOSITORY_SAFE_EXAMPLES as safe} from 'sos-data-utils-ts/repository-privacy'
 import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
 import {OrganizationLifecycleClaim} from 'sos-data-utils-ts/organization-lifecycle-contract'
+import {buildTestNetworkControllerWorkflowAssignment,OrganizationWorkflowGroupKinds,OrganizationWorkflowCapabilities} from 'sos-data-utils-ts/organization-workflow-access'
 import {OrganizationRegistrationWallet} from '../dist/organization-registration-wallet.js'
 import {createVerifiedGatewaySecureAdapter} from '../dist/registered-gateway-transport.js'
 import {WorkforceClient} from '../dist/workforce-client.js'
@@ -52,7 +53,7 @@ async function fixture(handler){
   if(!path.endsWith('-response')){
    const response=await handler(path,message)
    if(response?.httpStatus)return new Response('{}',{status:response.httpStatus})
-   replies.set(message.thid,{jti:randomUUID(),iss:response.iss,aud:controllerDid,thid:message.thid,body:response.body})
+   replies.set(message.thid,{jti:randomUUID(),iss:response.iss,aud:response.aud??controllerDid,thid:response.thid??message.thid,body:response.body})
    return new Response('{}',{status:202})
   }
   const packed=await wallet.packForRecipientWithContext(replies.get(message.thid),controllerDid,{context})
@@ -173,5 +174,70 @@ test('pre-DCR possession cannot list or mutate workforce, purchase seats or admi
   ()=>client.confirmLicenseOrder({offerId:'synthetic-offer',additionalClaims:{}}),
   ()=>client.organizationLifecycle({action:'status'}),
  ])await assert.rejects(run)
+ assert.equal(f.messages.length,0)
+})
+
+function workflowPlan(){
+ return buildTestNetworkControllerWorkflowAssignment({networkKind:'test-network',controller:{authorityKind:'organization-controller',organizationReference:`Organization/${safe.resourceUuid}`,accountId:'synthetic-controller-account'},
+  member:{accountId:'synthetic-employee-account',practitionerRoleReference:`PractitionerRole/${safe.demoOrganizationUuids.healthCare}`,role},groupKind:OrganizationWorkflowGroupKinds.SchedulingOperations,
+  groupReference:`Group/${safe.resourceUuid}`,capabilities:[OrganizationWorkflowCapabilities.ScheduleCruds,OrganizationWorkflowCapabilities.SlotCruds],assignedAt:'2026-11-15T00:00:00.000Z'})
+}
+function workflowReply(resourceType,message){
+ return {iss:providerDid,body:{resourceType:'Bundle',type:resourceType==='Group'?'batch-response':'_batch-response',data:message.body.data.map((entry,index)=>({
+  type:resourceType==='Group'?'Group-v5.0.0':'Consent',response:{status:String(index===0?201:200)},...(resourceType==='Group'?{resource:{resourceType:'Group',id:entry.resource.id}}:{}),
+ }))}}
+}
+
+test('workflow batches use real encrypted tenant Group/Consent routes, the actual provider issuer and snapshotted owned entries',async()=>{
+ need('submitWorkflowAccess')
+ const plan=workflowPlan(),entries=structuredClone([plan.group,plan.membership]),before=structuredClone(entries)
+ const f=await fixture(async(path,message)=>workflowReply(path.includes('/Group/')?'Group':'Consent',message))
+ const operationId=`workflow-group-${safe.resourceUuid}`
+ const pending=f.client.submitWorkflowAccess({resourceType:'Group',entries,operationId},{intervalMs:0})
+ entries[0].resource.id=safe.demoOrganizationUuids.healthCare
+ f.options.ctx.tenantId=safe.demoOrganizationUuids.healthCare;f.options.providerDid=hostDid
+ const group=await pending
+ assert.equal(group.resourceType,'Group');assert.equal(group.operationId,operationId)
+ assert.deepEqual(f.messages[0].message.body,{data:before})
+ assert.equal(f.messages[0].message.thid,operationId)
+ assert.equal(f.messages[0].path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.hl7.fhir.r5/Group/_batch`)
+ assert.equal(f.messages[1].path,f.messages[0].path+'-response')
+ const consent=await f.client.submitWorkflowAccess({resourceType:'Consent',entries:[plan.authorization],operationId:`workflow-consent-${safe.resourceUuid}`},{intervalMs:0})
+ assert.equal(consent.resourceType,'Consent')
+ assert.equal(f.messages[2].message.aud,providerDid)
+ assert.deepEqual(f.messages[2].message.body,{data:[plan.authorization]})
+ assert.equal(f.messages[2].path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.hl7.fhir.r5/Consent/_batch`)
+})
+
+test('workflow batches reject foreign reply bindings, failed entries and substituted Group receipts',async()=>{
+ need('submitWorkflowAccess')
+ const entries=[workflowPlan().group],input={resourceType:'Group',entries,operationId:`workflow-denial-${safe.resourceUuid}`}
+ const changed=[
+  reply=>({...reply,iss:tenantIssuer}),
+  reply=>({...reply,aud:employeeDid}),
+  reply=>({...reply,thid:'synthetic-foreign-thread'}),
+  reply=>({...reply,body:{...reply.body,data:[]}}),
+  reply=>({...reply,body:{...reply.body,data:reply.body.data.map(row=>({...row,resource:{resourceType:'Group',id:safe.demoOrganizationUuids.healthCare}}))}}),
+ ]
+ for(const change of changed){
+  const f=await fixture(async(_path,message)=>change(workflowReply('Group',message)))
+  await assert.rejects(f.client.submitWorkflowAccess(input,{intervalMs:0}),/workforce_(response_binding_invalid|workflow_receipt_invalid)/u)
+ }
+ const denied=await fixture(async(_path,message)=>{const reply=workflowReply('Group',message);reply.body.data[0].response.status='403';return reply})
+ await assert.rejects(denied.client.submitWorkflowAccess(input,{intervalMs:0}),error=>error.status===403)
+})
+
+test('workflow method accepts no arbitrary resource, URL, method or pre-DCR authority',async()=>{
+ need('submitWorkflowAccess')
+ const plan=workflowPlan(),f=await fixture(async()=>{throw new Error('invalid workflow reached transport')})
+ const input={resourceType:'Group',entries:[plan.group],operationId:`workflow-invalid-${safe.resourceUuid}`}
+ const bad=[{...input,resourceType:'Employee'},{...input,entries:[plan.authorization]},
+  {...input,entries:[{...plan.group,request:{method:'POST',url:f.options.baseUrl+'/foreign'}}]},
+  {...input,entries:[{...plan.group,request:{method:'DELETE',url:`Group/${safe.resourceUuid}`}}]},
+  {...input,entries:[{...plan.membership,request:{method:'PATCH',url:'Group/*'}}]},
+ ]
+ for(const value of bad)await assert.rejects(f.client.submitWorkflowAccess(value,{intervalMs:0}),/workforce_workflow_input_invalid/u)
+ const options={...f.options,transportProfile:'pre-dcr-didcomm-encrypted'};delete options.clientId;delete options.tenantIssuer
+ await assert.rejects(new WorkforceClient(options).submitWorkflowAccess(input),/workforce_registered_controller_transport_required/u)
  assert.equal(f.messages.length,0)
 })

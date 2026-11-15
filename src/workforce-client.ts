@@ -11,6 +11,7 @@ import {RegisteredGatewayTransport,gatewayResponseEntries,type VerifiedGatewaySe
 import type {ServerProfileKeyDescriptor} from './server-profile-custody-keys.js'
 import {IdentityAuthRequestFields} from 'sos-data-utils-ts/identity-auth-wire-contract'
 import type {OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-lifecycle-contract'
+import type {OrganizationWorkflowFlatEntry} from 'sos-data-utils-ts/organization-workflow-access'
 import {projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
 
 type Row=Record<string,unknown>
@@ -18,6 +19,47 @@ const record=(value:unknown):Row|undefined=>value!==null&&typeof value==='object
 const text=(value:unknown):string=>typeof value==='string'?value.trim():''
 function claims(row:Row):Row{return record(record(record(row.resource)?.meta)?.claims)??{}}
 function requireText(value:unknown,error:string):string{const result=text(value);if(!result)throw new TypeError(error);return result}
+const workflowInvalid=()=>new TypeError('workforce_workflow_input_invalid')
+function workflowArray(value:unknown):asserts value is unknown[]{
+ if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)throw workflowInvalid()
+ const descriptors=Object.getOwnPropertyDescriptors(value)
+ for(const name of Reflect.ownKeys(descriptors)){
+  if(typeof name!=='string'||(name!=='length'&&!/^(?:0|[1-9][0-9]*)$/u.test(name))||!('value'in descriptors[name]!))throw workflowInvalid()
+ }
+ for(let index=0;index<value.length;index++)if(!descriptors[String(index)])throw workflowInvalid()
+}
+function workflowObject(value:unknown,keys?:readonly string[]):Row{
+ if(!value||typeof value!=='object'||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw workflowInvalid()
+ const output:Row=Object.create(null),descriptors=Object.getOwnPropertyDescriptors(value)
+ for(const name of Reflect.ownKeys(descriptors)){
+  if(typeof name!=='string'||(keys&&!keys.includes(name)))throw workflowInvalid()
+  const descriptor=descriptors[name]!
+  if(!('value'in descriptor))throw workflowInvalid()
+  output[name]=descriptor.value
+ }
+ return output
+}
+function workflowEntries(resourceType:'Group'|'Consent',input:readonly OrganizationWorkflowFlatEntry[]):OrganizationWorkflowFlatEntry[]{
+ workflowArray(input)
+ if(!input.length)throw workflowInvalid()
+ for(const value of input){
+  const entry=workflowObject(value,['type','request','resource']),request=workflowObject(entry.request,['method','url']),resource=workflowObject(entry.resource,['resourceType','id','meta'])
+  if(entry.type!==`${resourceType}-v5.0.0`||resource.resourceType!==resourceType||typeof resource.id!=='string'||!/^[A-Za-z0-9.-]{1,64}$/u.test(resource.id))throw workflowInvalid()
+  if((request.method==='POST'&&request.url!==resourceType)||(request.method==='PATCH'&&request.url!==`${resourceType}/${resource.id}`)||(request.method!=='POST'&&request.method!=='PATCH'))throw workflowInvalid()
+  const metadata=workflowObject(resource.meta,['claims']),values=workflowObject(metadata.claims)
+  if(!Object.keys(values).length)throw workflowInvalid()
+  for(const [name,value] of Object.entries(values)){
+   if(!name||/[\u0000-\u001f]/u.test(name))throw workflowInvalid()
+   if(resourceType==='Consent'){if(typeof value!=='string')throw workflowInvalid()}
+   else{
+    workflowArray(value)
+    const items=Object.getOwnPropertyDescriptors(value)
+    for(let index=0;index<value.length;index++)if(!items[String(index)]||!('value'in items[String(index)]!)||typeof items[String(index)]!.value!=='string')throw workflowInvalid()
+   }
+  }
+ }
+ return input.map(entry=>structuredClone(entry))
+}
 function canonicalContact(contact:ActorContactInput):ActorContactInput{return {contactKind:contact.contactKind,contact:normalizeActorContact(contact)}}
 function contactClaims(contact:ActorContactInput):Row{return {[contact.contactKind==='phone'?Person.Telephone:Person.Email]:contact.contact}}
 function sameContact(row:Row,contact:ActorContactInput):boolean{
@@ -105,6 +147,21 @@ export class WorkforceClient{
   if(!this.hostRegistry||!this.hostTransport)throw new Error('workforce_host_registry_context_required')
   const prefix='/host/cds-'+encodeURIComponent(this.hostRegistry.jurisdiction)+'/v1/'+encodeURIComponent(this.hostRegistry.hostNetwork)+'/registry/org.schema'
   return {configuration:this.hostRegistry,transport:this.hostTransport,prefix}
+ }
+ /** Fixed workflow Group/Consent routes; host and GW retain all assignment/admission policy. */
+ async submitWorkflowAccess(input:Readonly<{resourceType:'Group'|'Consent';entries:readonly OrganizationWorkflowFlatEntry[];operationId:string}>,pollOptions?:PollOptions){
+  const identity=this.controller(),resourceType=input.resourceType,operationId=input.operationId
+  if((resourceType!=='Group'&&resourceType!=='Consent')||typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,200}$/u.test(operationId))throw workflowInvalid()
+  const entries=workflowEntries(resourceType,input.entries)
+  const result=await this.transport.exchange(`${this.prefix}/organization/org.hl7.fhir.r5/${resourceType}/_batch`,this.administrationMessage({data:entries},operationId),identity.providerDid,pollOptions)
+  const envelope=record(result.poll.body),body=record(envelope?.body)??envelope,rows=gatewayResponseEntries(result.poll.body)
+  if(!body||body.resourceType!=='Bundle'||!['batch-response','_batch-response'].includes(String(body.type))||rows.length!==entries.length)throw new Error('workforce_workflow_receipt_invalid')
+  for(let index=0;index<rows.length;index++){
+   const row=rows[index]!,response=record(row.response),resource=record(row.resource)
+   if(!/^(?:2[0-9]{2})(?: [A-Za-z][A-Za-z -]*)?$/u.test(String(response?.status))||row.type!==(resourceType==='Group'?'Group-v5.0.0':'Consent'))throw new Error('workforce_workflow_receipt_invalid')
+   if((resourceType==='Group'&&resource?.id!==entries[index]!.resource.id)||(resource?.id!==undefined&&resource.id!==entries[index]!.resource.id))throw new Error('workforce_workflow_receipt_invalid')
+  }
+  return {resourceType,operationId,result}
  }
  /** Authenticated directory envelopes become typed contacts and exact seat/device projections. */
  async getAdministration(pollOptions?:PollOptions){

@@ -1,6 +1,14 @@
 import type {WorkforceClient} from 'sos-sdk-node-ts/workforce-client'
 import type {LicenseListSummary,OrganizationEmployeeLifecycleRecord} from 'sos-data-utils-ts/employee-routing'
 import type {OrganizationLifecycleSnapshot,OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-lifecycle-contract'
+import type {OrganizationWorkflowFlatEntry} from 'sos-data-utils-ts/organization-workflow-access'
+export async function workflow(client:WorkforceClient,entries:readonly OrganizationWorkflowFlatEntry[]){
+ const reply=await client.submitWorkflowAccess({resourceType:'Group',entries,operationId:'synthetic-workflow-operation'})
+ const resourceType:'Group'|'Consent'=reply.resourceType
+ // @ts-expect-error The workflow purpose cannot address arbitrary resource managers.
+ await client.submitWorkflowAccess({resourceType:'Employee',entries,operationId:'synthetic-workflow-operation'})
+ return {resourceType,result:reply.result}
+}
 export async function inspect(client:WorkforceClient){
  const inventory=await client.getAdministration()
  const summary:LicenseListSummary=inventory.licenses

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Submit purpose-fixed workflow Group/Consent entries through the existing
+  registered workforce transport. Preserve provider/caller/thread binding and
+  actual acknowledgements without exposing a generic gateway batch method.
+
 - Allow initial recovery-code redelivery only for the same generation-one
   identity and seed after host current-profile PIN/revision checks; preserve
   the original code without another write or rotation.
