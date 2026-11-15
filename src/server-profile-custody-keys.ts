@@ -1,5 +1,5 @@
 import {createECDH,createHash,createPrivateKey,randomBytes,randomUUID,sign,type KeyObject} from 'node:crypto'
-import {CryptographyService} from 'antifraud-data-utils-ts/cryptography'
+import {CryptographyService,type MlkemPrivateJwk} from 'antifraud-data-utils-ts/cryptography'
 import {OrganizationRegistrationWallet} from './organization-registration-wallet.js'
 
 type PublicKey=Readonly<Record<string,unknown>>
@@ -71,6 +71,29 @@ function snapshot(value:unknown,seen=new Set<object>()):unknown{
  }finally{seen.delete(value)}
 }
 
+/** JSON-compatible document projection without executing accessors or toJSON. */
+function documentSnapshot(value:unknown,seen=new Set<object>()):unknown{
+ if(value===null||typeof value==='string'||typeof value==='boolean')return value
+ if(typeof value==='number')return Number.isFinite(value)?value:null
+ if(typeof value!=='object'||!value||seen.has(value))throw new TypeError('server_profile_document_content_invalid')
+ seen.add(value)
+ try{
+  if(Array.isArray(value)){
+   if(Object.getPrototypeOf(value)!==Array.prototype)throw failure()
+   const descriptors=Object.getOwnPropertyDescriptors(value),result:unknown[]=[]
+   for(let index=0;index<value.length;index++){
+    const entry=descriptors[String(index)]
+    if(entry&&!('value' in entry))throw failure()
+    result.push(!entry||entry.value===undefined?null:documentSnapshot(entry.value,seen))
+   }
+   return result
+  }
+  const input=own(value),result:Record<string,unknown>=Object.create(null)
+  for(const [name,entry] of Object.entries(input))if(entry!==undefined)result[name]=documentSnapshot(entry,seen)
+  return result
+ }finally{seen.delete(value)}
+}
+
 /** Recovers existing purpose-separated custody. Enrollment creates no authority; registered mode requires exact stored material. */
 export async function openServerProfileCustodyKeys(options:ServerProfileCustodyKeysOptions){
  const id=options.walletKeyDerivationId,seed=options.unlockedWalletSeed
@@ -132,5 +155,38 @@ export async function openServerProfileCustodyKeys(options:ServerProfileCustodyK
   const signature=sign('sha384',Buffer.from(signingInput,'ascii'),{key:vp.key,dsaEncoding:'ieee-p1363'}).toString('base64url')
   return `${signingInput}.${signature}`
  }
- return Object.freeze({descriptors,publicJwks:Object.freeze(dcr.map(entry=>entry.publicJwk)),storagePublicJwk:descriptors[1]!.publicJwk,signActorJws:managed(actor,false),signVpJws:managed(vp,true),signActorDetachedJws,signIdentityPresentationJws})
+ // id, seed and binding are already snapshots of the opening inputs. Never
+ // reread caller options here: logical row IDs do not select custody owners.
+ const ownerBinding=createHash('sha256').update(`storage:profile:${id}`,'utf8').digest('base64url')
+ const documentHeader=Object.freeze({typ:'gdc-confidential-document+jwe',cty:'application/json',enc:'A256GCM',gdc_pq_profile:'confidential-pqc-v1',gdc_key_purpose:'document-at-rest',gdc_owner_binding:ownerBinding})
+ const withStorageKey=async<T>(operation:(key:MlkemPrivateJwk)=>Promise<T>):Promise<T>=>{
+  if(binding.kind!=='registered')throw new Error('server_profile_document_registered_binding_required')
+  const material=createHash('sha512').update(`${seed}:${profileOwner}:document-at-rest:0`,'utf8').digest()
+  let pair:Awaited<ReturnType<CryptographyService['generateKeyPairMlKem']>>|undefined
+  try{
+   pair=await crypto.generateKeyPairMlKem(material,'ML-KEM-768')
+   match(descriptors[1]!,pair.publicJWKey)
+   return await operation({...pair.publicJWKey,dBytes:pair.secretKeyBytes})
+  }finally{material.fill(0);pair?.secretKeyBytes.fill(0)}
+ }
+ const confidentialStorageAdapter=Object.freeze({
+  async protect<T extends Readonly<{content:unknown}>>(document:T):Promise<Omit<T,'content'|'jwe'>&{jwe:string}>{
+   const input=own(document)
+   if(!Object.hasOwn(input,'content')||input.content===undefined)throw new TypeError('server_profile_document_content_required')
+   const content=documentSnapshot(input.content),{content:_content,...metadata}=input
+   const jwe=await withStorageKey(key=>crypto.encryptJweToCompact(JSON.stringify(content),documentHeader,key,key))
+   return {...metadata,jwe} as Omit<T,'content'|'jwe'>&{jwe:string}
+  },
+  async unprotect<T extends Readonly<{jwe:unknown}>>(document:T):Promise<Omit<T,'jwe'|'content'>&{content:unknown}>{
+   const input=own(document)
+   if(typeof input.jwe!=='string'||!input.jwe)throw new TypeError('server_profile_document_compact_jwe_required')
+   const decoded=await withStorageKey(key=>crypto.decryptJwe(input.jwe as string,key)),header=own(decoded.protectedHeader)
+   for(const [name,value] of Object.entries(documentHeader))if(header[name]!==value)throw new Error('server_profile_document_owner_or_policy_binding_invalid')
+   if(header.alg!=='ML-KEM-768+HKDF-SHA256+A256GCMKW'||header.kid!==descriptors[1]!.kid)throw new Error('server_profile_document_key_binding_invalid')
+   const content:unknown=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(decoded.decryptedBytes))
+   const {jwe:_jwe,...metadata}=input
+   return {...metadata,content} as Omit<T,'jwe'|'content'>&{content:unknown}
+  },
+ })
+ return Object.freeze({descriptors,publicJwks:Object.freeze(dcr.map(entry=>entry.publicJwk)),storagePublicJwk:descriptors[1]!.publicJwk,signActorJws:managed(actor,false),signVpJws:managed(vp,true),signActorDetachedJws,signIdentityPresentationJws,confidentialStorageAdapter})
 }

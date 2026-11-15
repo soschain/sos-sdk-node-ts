@@ -40,6 +40,33 @@ These operations do not weaken the two client-bound methods above. The host
 still owns holder, audience, nonce, credential and responsibility checks.
 
 Private material is never returned. This helper does not replace the existing
-communication wallet, perform DCR, encrypt documents or establish evidence
-readiness. Its document public key is a compatibility descriptor, not proof
-that document storage or synchronization has run.
+communication wallet, perform DCR or establish evidence readiness.
+
+The returned `confidentialStorageAdapter` opens and protects compact confidential
+document JWEs only with an explicit registered binding. `protect` replaces
+`content` with `jwe`; `unprotect` restores the content and retains outer row
+metadata. JSON optional object fields are omitted and undefined array entries
+become null. Content accessors and executable values are rejected without
+invocation; outer metadata is retained as supplied by the host.
+
+The document key retains `profile:<effective derivation ID>:default` key
+separation. Its authenticated owner hash uses the distinct
+`storage:profile:<effective derivation ID>` namespace. The effective ID is the
+stored `walletKeyDerivationId`, falling back to the stored profile ID at the
+host boundary. The helper snapshots that input at opening; a later mutation of
+caller options cannot select a different key or owner. Logical row IDs are
+outer metadata and are not authenticated by this existing document format.
+
+The existing `gdc-confidential-document+jwe`, `gdc_pq_profile`,
+`gdc_key_purpose` and `gdc_owner_binding` protected values are stored-format
+compatibility discriminators. They create no dependency on a historical
+package. Document ML-KEM private bytes are derived for each operation and wiped
+afterward; the communication key is never substituted. Storage and channel
+authorization remain with the host.
+
+The static compatibility test fixture is newly captured synthetic output from
+the historical published runtime, with registry byte provenance and readback.
+It is not a pre-existing persisted or production document. Its separately
+crafted wrong-owner probe authenticates under the same document key and must
+still fail the owner-policy check. Package tests import only the static fixture
+and owned Antifraud/SOS code.

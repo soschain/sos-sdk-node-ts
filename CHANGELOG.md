@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add registered confidential document custody over the existing compact-JWE
+  profile, preserving document-key and effective-owner bindings, historical
+  protected headers and outer row metadata without returning private keys.
+
 - Add purpose-separated registered actor detached credential signing and exact
   identity-presentation VP signing while retaining strict client-bound APIs,
   original public keys and caller-provided claim values.
