@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Share explicit encrypted pre-DCR Token/Device transport below domain admission
+  for controller and employee enrollment. Preserve employee grant checks, exact
+  key purposes, optional registration token and trusted reply bindings; snapshot
+  configured identity and request material for stable-installation retries.
+
 ## 0.5.0 - 2026-11-15
 
 - Accept device enrollment responses without an optional registration management

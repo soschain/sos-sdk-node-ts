@@ -33,6 +33,8 @@ Configured gateway communication-key resolution is documented in
 [`docs/REGISTERED_DID_KEYS.md`](docs/REGISTERED_DID_KEYS.md).
 Staff provisioning and recipient installation contracts are documented in
 [`docs/WORKFORCE_CLIENT.md`](docs/WORKFORCE_CLIENT.md).
+The shared pre-DCR transport below controller/employee admission is described in
+[`docs/DEVICE_ENROLLMENT.md`](docs/DEVICE_ENROLLMENT.md).
 Organization bootstrap response authentication and configured signing-key custody
 are documented in
 [`docs/ORGANIZATION_RESPONSE_AUTHENTICATION.md`](docs/ORGANIZATION_RESPONSE_AUTHENTICATION.md).
