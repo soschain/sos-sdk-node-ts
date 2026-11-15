@@ -1,4 +1,4 @@
-import {createHash,randomBytes,randomUUID} from 'node:crypto'
+import {createHash,createPublicKey,randomBytes,randomUUID,verify} from 'node:crypto'
 import {CryptographyService,type PublicJwk} from 'antifraud-data-utils-ts/cryptography'
 import {normalizeUuid} from 'antifraud-data-utils-ts/organization-identity'
 import {CompositionAttesterModes} from 'fhir-data-utils-ts'
@@ -9,6 +9,7 @@ import {RegisteredProfileSessions,type RegisteredProfileSessionsOptions} from '.
 import {RegisteredGatewayTransport,createVerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
 import {openRegisteredCommunicationWallet} from './registered-communication-wallet.js'
 import {SosGatewaySubjectDirectoryClient,type AuthorizedSubjectVerifiedContact} from './subject-card-directory-client.js'
+import type {RegisteredSmartTokenAlgorithm} from './registered-did-keys.js'
 
 export type RegisteredProfileAccessOptions=RegisteredProfileSessionsOptions&Readonly<{
  gateway:Readonly<{
@@ -17,6 +18,8 @@ export type RegisteredProfileAccessOptions=RegisteredProfileSessionsOptions&Read
   responseIssuer:string
   resolveRecipientJwk:(did:string)=>Promise<Readonly<Record<string,unknown>>>
   resolveGatewaySigningJwk:(did:string)=>Promise<PublicJwk>
+  /** Host-selected SMART method/algorithm; never inferred from token headers. */
+  smartTokenVerification:Readonly<{algorithm:RegisteredSmartTokenAlgorithm;resolveSigningJwk:(providerDid:string)=>Promise<PublicJwk>}>
  }>
  fetchImpl?:typeof fetch
  pollOptions?:PollOptions
@@ -43,7 +46,7 @@ const equal=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b)
 function scope(value:string,subject:string){
  const question=value.indexOf('?'),head=value.slice(0,question),query=new URLSearchParams(value.slice(question+1))
  const keys=[...query.keys()]
- if(question<0||!/^organization\/Composition\.(r|rs)$/u.test(head)||query.get('subject')!==subject||keys.some(key=>key!=='subject'&&key!=='section')||new Set(keys).size!==keys.length)throw denied()
+ if(question<0||!/^organization\/Composition\.(r|rs|cruds)$/u.test(head)||query.get('subject')!==subject||keys.some(key=>key!=='subject'&&key!=='section')||new Set(keys).size!==keys.length)throw denied()
  const sections=(query.get('section')??'').split(',').filter(Boolean)
  if(!sections.length||new Set(sections).size!==sections.length)throw denied()
  return {head,sections}
@@ -60,9 +63,10 @@ export class RegisteredProfileAccess{
  private readonly baseUrl:string
  private readonly crypto=new CryptographyService({getRandomBytes:async n=>randomBytes(n),digestString:async(value,algorithm)=>createHash(algorithm.replaceAll('-','').toLowerCase()).update(value,'utf8').digest('hex'),randomUUID})
  constructor(options:RegisteredProfileAccessOptions){
-  const gateway={...options.gateway},url=new URL(gateway.baseUrl)
+  const gateway={...options.gateway,smartTokenVerification:Object.freeze({...options.gateway.smartTokenVerification})},url=new URL(gateway.baseUrl)
   if((url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname)))||url.username||url.password||url.search||url.hash)throw denied()
   if(!text(gateway.providerDid).startsWith('did:web:')||gateway.responseIssuer!==gateway.providerDid)throw denied()
+  if(!['ES384','ES256','ML-DSA-44','ML-DSA-65','ML-DSA-87'].includes(gateway.smartTokenVerification.algorithm)||typeof gateway.smartTokenVerification.resolveSigningJwk!=='function')throw denied()
   this.baseUrl=url.href.replace(/\/+$/u,'')
   this.options={...options,collections:Object.freeze({...options.collections}),gateway:Object.freeze(gateway),pollOptions:Object.freeze({...options.pollOptions})}
   this.sessions=new RegisteredProfileSessions(this.options)
@@ -198,15 +202,23 @@ export class RegisteredProfileAccess{
  private async token(compact:string,opened:Opened,jti:string,patient:string,requested:readonly string[],body:Record<string,unknown>){
   const parts=text(compact).split('.')
   if(parts.length!==3||parts.some(part=>!part||!/^[A-Za-z0-9_-]+$/u.test(part)))throw denied()
-  const header=record(JSON.parse(Buffer.from(parts[0]!,'base64url').toString('utf8'))),key=await this.options.gateway.resolveGatewaySigningJwk(this.options.gateway.providerDid)
-  if(key.kty!=='AKP'||!['ML-DSA-44','ML-DSA-65','ML-DSA-87'].includes(key.alg)||'d'in key||'dBytes'in key||'privBytes'in key||header.alg!==key.alg||header.kid!==key.kid||!await this.crypto.verifyJws(compact,key))throw denied()
+  const policy=this.options.gateway.smartTokenVerification
+  const header=record(JSON.parse(Buffer.from(parts[0]!,'base64url').toString('utf8'))),key=await policy.resolveSigningJwk(this.options.gateway.providerDid),publicKey=record(key)
+  if(['d','k','dBytes','privBytes','priv','privateKey','secretKeyBytes'].some(field=>field in publicKey)||publicKey.use!==undefined&&publicKey.use!=='sig'||header.alg!==policy.algorithm||publicKey.alg!==policy.algorithm||header.kid!==publicKey.kid||typeof publicKey.kid!=='string'||!publicKey.kid)throw denied()
+  if(policy.algorithm==='ES384'||policy.algorithm==='ES256'){
+   const curve=policy.algorithm==='ES384'?'P-384':'P-256',size=policy.algorithm==='ES384'?48:32
+   if(publicKey.kty!=='EC'||publicKey.crv!==curve)throw denied()
+   for(const field of ['x','y']){const value=text(publicKey[field]);if(Buffer.from(value,'base64url').length!==size||Buffer.from(value,'base64url').toString('base64url')!==value)throw denied()}
+   const ec=createPublicKey({key:{kty:'EC',crv:curve,x:text(publicKey.x),y:text(publicKey.y)},format:'jwk'})
+   if(!verify(policy.algorithm==='ES384'?'sha384':'sha256',Buffer.from(`${parts[0]}.${parts[1]}`,'ascii'),{key:ec,dsaEncoding:'ieee-p1363'},Buffer.from(parts[2]!,'base64url')))throw denied()
+  }else if(key.kty!=='AKP'||key.alg!==policy.algorithm||!await this.crypto.verifyJws(compact,key))throw denied()
   const claims=record(JSON.parse(Buffer.from(parts[1]!,'base64url').toString('utf8'))),now=Math.floor(this.now().getTime()/1000)
   if(claims.iss!==opened.profile.providerDid||claims.aud!==opened.profile.providerDid||claims.sub!==opened.profile.actorDid||claims.jti!==jti||!Number.isSafeInteger(claims.exp)||Number(claims.exp)<=now)throw new Error('registered_profile_access_token_expired_or_binding_invalid')
   if(!Number.isSafeInteger(claims.iat)||Number(claims.iat)>now||(claims.nbf!==undefined&&(!Number.isSafeInteger(claims.nbf)||Number(claims.nbf)>now)))throw denied()
   if(body.subject!==patient||body.token_type!=='Bearer'||typeof body.scope!=='string'||claims.scope!==body.scope)throw denied()
   const grants=body.scope.split(/\s+/u).filter(Boolean)
   if(!grants.length||new Set(grants).size!==grants.length||grants.join(' ')!==body.scope)throw denied()
-  for(const grant of grants){const actual=scope(grant,patient);if(!requested.some(value=>{const allowed=scope(value,patient);return (allowed.head===actual.head||(allowed.head.endsWith('.rs')&&actual.head.endsWith('.r')))&&actual.sections.every(section=>allowed.sections.includes('*')||allowed.sections.includes(section))}))throw denied()}
+  for(const grant of grants){const actual=scope(grant,patient);if(!requested.some(value=>{const allowed=scope(value,patient),actions=allowed.head.split('.')[1]!,grantedActions=actual.head.split('.')[1]!;return [...grantedActions].every(action=>actions.includes(action))&&actual.sections.every(section=>allowed.sections.includes('*')||allowed.sections.includes(section))}))throw denied()}
   return {claims,scopes:grants}
  }
  async selectAuthorizedSubject(input:AuthInput&Readonly<{subjectDid:string;scopes:readonly string[]}>){
@@ -214,7 +226,7 @@ export class RegisteredProfileAccess{
   if(!assignment?.transportSubjectDid||!opened.session.authorizedSubjectDids?.includes(input.subjectDid))throw denied()
   const patient=assignment.transportSubjectDid
   if(!Array.isArray(input.scopes)||!input.scopes.length)throw denied()
-  const requested=input.scopes.map(value=>{const parsed=scope(text(value),input.subjectDid);return buildScopeSmartCompositionAccess({subjectDid:patient,sections:parsed.sections,accessVerb:parsed.head.endsWith('.rs')?'rs':'r'})})
+  const requested=input.scopes.map(value=>{const parsed=scope(text(value),input.subjectDid);return buildScopeSmartCompositionAccess({subjectDid:patient,sections:parsed.sections,accessVerb:parsed.head.endsWith('.cruds')?'cruds':parsed.head.endsWith('.rs')?'rs':'r'})})
   const path=`${this.route(input)}/identity/openid/smart/token`,audience=`${this.baseUrl}${path}`,operation=randomUUID()
   const assertion=await opened.custody.signClientAssertion({clientId:opened.profile.clientId,audience,issuedAt:Math.floor(this.now().getTime()/1000),jti:randomUUID()})
   const message={thid:operation,jti:operation,iss:opened.profile.actorDid,aud:audience,client_id:opened.profile.clientId,body:{client_id:opened.profile.clientId,sub:opened.profile.actorDid,id_token:text(input.idToken),client_assertion:assertion,client_assertion_type:'private_key_jwt',acr_values:'urn:antifraud:acr:openid4vp:individual',purpose:'TREAT',scope:requested.join(' ')}}

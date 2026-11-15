@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserve actual registered SMART r/rs/cruds grants and independently configured
+  ES384, explicit ES256 or PQC token verification without weakening outer PQC
+  transport. Select token keys from trusted provider authentication methods and
+  retain narrower granted actions/sections exactly.
+
 - Compose registered individual-controller custody, encrypted subject discovery
   and verified SMART selection in one host-only access use case. Keep normal
   runtime ES384 client assertions distinct from actor/VP signing, and bind

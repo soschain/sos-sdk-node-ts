@@ -37,8 +37,21 @@ The configured gateway signature, envelope issuer/audience/thread, access JWT
 issuer/audience/actor/operation/time, granted scopes and response patient all
 must match. The access JWT `sub` is the actor; the separately bound response
 patient is the selected canonical subject. Missing granted scopes never fall
-back to requested scopes. Only Composition read/read-search scopes are
-supported here; narrower sections are retained and foreign/extra grants fail.
+back to requested scopes. Existing Composition r/rs/cruds permissions are
+supported here; every granted action and section must be a subset of a requested
+permission. Narrower grants are retained exactly and foreign/extra grants fail.
+
+`gateway.smartTokenVerification` is an explicit host-selected algorithm and
+signing-key resolver, separate from outer PQC communication verification.
+The actual gateway can sign SMART with ES384, explicitly configured ES256, or
+its configured PQC key while outer transport stays PQC. Use
+`resolveRegisteredSmartTokenSigningJwk` with a fixed algorithm and optional
+fixed verification-method pin to select one authentication key from the expected
+provider document. ES384 requires P-384 and ES256 requires P-256. A token header
+cannot choose the resolver URL, provider, algorithm policy or method pin. There
+is no automatic algorithm fallback; wrong material, private fields, ambiguity,
+foreign relationships and unconfigured algorithms fail closed. Normal profile
+six-key derivation and client-assertion purpose remain unchanged.
 
 Tokens are sealed under `<sessionId>:access-token`. Network and cryptographic
 work happens before a transaction that rechecks exact profile and session
@@ -66,3 +79,6 @@ remain necessary. The original orchestration evidence is available at
 [ServerProfileSessionManager](https://github.com/Global-DataCare/gdc-sdk-node-ts/blob/main/src/server-profile-session-manager.ts)
 and [ServerProfileSession](https://github.com/Global-DataCare/gdc-sdk-node-ts/blob/main/src/server-profile-session.ts).
 These are source references only; this package imports no historical runtime.
+The separate SMART signature profile follows the current
+[gateway token issuer](https://github.com/soschain/sos-gw-node-ts/blob/main/src/managers/OpenIdAuthManager.ts)
+and its [published DID relationships](https://github.com/soschain/sos-gw-node-ts/blob/main/src/utils/did-backend.ts).
