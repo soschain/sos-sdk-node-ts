@@ -142,6 +142,32 @@ export class ProfileRecoveryService<PreparedProfile=unknown>{
    return {recoveryCode:material.recoveryCode}
   }finally{seed.fill(0)}
  }
+ /** Host must first verify the CURRENT stored profile PIN and unchanged credential revision.
+  * Redelivery is restricted to the initial generation and never rotates or writes state. */
+ async resumeEnrollment(input:ProfileRecoveryIdentity,currentPinOpenedSeed:Uint8Array):Promise<{recoveryCode:string}>{
+  const binding=identity(input),seed=bytes(currentPinOpenedSeed)
+  let server:Buffer|undefined,user:Buffer|undefined
+  try{
+   const loaded=await this.repository.get(binding.profileId)
+   if(!loaded)throw new Error('profile_recovery_not_found')
+   own(loaded)
+   const current=structuredClone(loaded)
+   if(current.profileId!==binding.profileId||current.ownerId!==binding.ownerId||current.controllerKind!==binding.controllerKind)throw invalid()
+   if(binding.contactKind==='email'){
+    if(current.version!=='uhc-profile-recovery-v1'||current.verifiedEmail!==binding.contact||current.contactKind!==undefined||current.verifiedTelephone!==undefined)throw invalid()
+   }else if(current.version!=='sos-profile-recovery-v1'||current.contactKind!=='phone'||current.verifiedTelephone!==binding.contact||current.verifiedEmail!==undefined)throw invalid()
+   if(generation(current.generation)!==1)throw new Error('profile_recovery_initial_delivery_closed')
+   if(current.kmsKeyName!==this.kms.keyName)throw new Error('profile_recovery_kms_key_mismatch')
+   if(!matchesFingerprint(seed,current.seedFingerprint))throw materialInvalid()
+   server=bytes(await this.kms.decrypt(text(current.encryptedServerShare),aad(this.environment,binding,1)))
+   user=xor(seed,server)
+   const result={recoveryCode:code(user)}
+   // A concurrent rotation/replacement closes initial-code disclosure too.
+   const latest=await this.repository.get(binding.profileId)
+   if(!latest||JSON.stringify(latest)!==JSON.stringify(loaded))throw new Error('profile_recovery_changed')
+   return result
+  }finally{seed.fill(0);server?.fill(0);user?.fill(0)}
+ }
  async recover(input:ProfileRecoveryIdentity,recoveryCode:string):Promise<{replacementRecoveryCode:string}>{
   const binding=identity(input),loaded=await this.repository.get(binding.profileId)
   if(!loaded)throw new Error('profile_recovery_not_found')

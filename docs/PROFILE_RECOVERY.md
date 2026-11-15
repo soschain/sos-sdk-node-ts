@@ -50,3 +50,12 @@ explicit. Its loopback HTTP tests do not establish live IAM or KMS readiness.
 
 The host still composes its profile store, recovery routes, verified contact and
 initial enrollment authority through the repository and preparation ports.
+
+`resumeEnrollment(identity, currentPinOpenedSeed)` permits redelivery of the
+initial generation's identical code without a write or rotation. The host must
+first open the CURRENT persisted profile envelope with its PIN/lockout policy,
+and check the same credential revision before returning the code. A preserved
+bootstrap PIN is insufficient. The coordinator checks exact identity/contact,
+KMS key, seed fingerprint and generation one, then rechecks its record after KMS.
+A recovered generation cannot resume initial delivery. This method is a trusted
+server primitive; it never authenticates a PIN or account itself.

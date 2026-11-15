@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Allow initial recovery-code redelivery only for the same generation-one
+  identity and seed after host current-profile PIN/revision checks; preserve
+  the original code without another write or rotation.
+
 - Coordinate controller recovery through owned share/ciphertext and atomic
   generation ports. Preserve historical email record/AAD/code bytes, bind
   phones separately, and return recovery codes without returning wallet seeds.
