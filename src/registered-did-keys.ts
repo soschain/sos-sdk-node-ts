@@ -1,7 +1,8 @@
 import type {DidDocument,VerificationMethod} from 'antifraud-data-utils-ts/did-document'
-import type {MldsaPublicJwk,MlkemPublicJwk} from 'antifraud-data-utils-ts/cryptography'
+import type {MldsaPublicJwk,MlkemPublicJwk,PublicJwk} from 'antifraud-data-utils-ts/cryptography'
 
 type Options=Readonly<{fetchImpl?:typeof fetch;didDocumentUrl?:string;allowLoopbackHttp?:boolean;requestTimeoutMs?:number}>
+export type RegisteredSmartTokenAlgorithm='ES384'|'ES256'|'ML-DSA-44'|'ML-DSA-65'|'ML-DSA-87'
 type Row=Record<string,unknown>
 const fail=()=>new Error('registered_did_document_key_binding_invalid')
 function row(value:unknown):Row{if(!value||typeof value!=='object'||Array.isArray(value))throw fail();return value as Row}
@@ -52,9 +53,7 @@ async function readDocument(response:Response):Promise<DidDocument>{
  * DID method or algorithm. Only local authentication and keyAgreement methods
  * establish candidates; untrusted key identifiers never become fetch targets.
  */
-export async function resolveRegisteredDidWebKeys(did:string,options:Options={}):Promise<Readonly<{
- signingJwk:MldsaPublicJwk;keyAgreementJwk:MlkemPublicJwk;signingMethodId:string;keyAgreementMethodId:string
-}>>{
+async function configuredDocument(did:string,options:Options):Promise<DidDocument>{
  text(did)
  const target=documentUrl(did,options),timeout=options.requestTimeoutMs??15000
  if(!Number.isSafeInteger(timeout)||timeout<1)throw new TypeError('registered_did_document_timeout_invalid')
@@ -62,6 +61,12 @@ export async function resolveRegisteredDidWebKeys(did:string,options:Options={})
  if(!response.ok)throw new Error(`registered_did_document_http_${response.status}`)
  const document=await readDocument(response)
  if(document.id!==did)throw new Error('registered_did_document_identity_mismatch')
+ return document
+}
+export async function resolveRegisteredDidWebKeys(did:string,options:Options={}):Promise<Readonly<{
+ signingJwk:MldsaPublicJwk;keyAgreementJwk:MlkemPublicJwk;signingMethodId:string;keyAgreementMethodId:string
+}>>{
+ const document=await configuredDocument(did,options)
  const methods=new Map<string,VerificationMethod>()
  if(document.verificationMethod!==undefined&&!Array.isArray(document.verificationMethod))throw fail()
  for(const value of document.verificationMethod??[]){
@@ -102,4 +107,43 @@ export async function resolveRegisteredDidWebKeys(did:string,options:Options={})
  }
  const signing=candidates('authentication'),agreement=candidates('keyAgreement')
  return {signingJwk:signing.key as unknown as MldsaPublicJwk,keyAgreementJwk:agreement.key as unknown as MlkemPublicJwk,signingMethodId:signing.methodId,keyAgreementMethodId:agreement.methodId}
+}
+
+/** Selects SMART authentication material by host policy, independently of outer PQC transport. */
+export async function resolveRegisteredSmartTokenSigningJwk(did:string,options:Options&Readonly<{algorithm:RegisteredSmartTokenAlgorithm;verificationMethodId?:string}>):Promise<PublicJwk&Readonly<{use?:string}>>{
+ const algorithm=options.algorithm
+ if(!['ES384','ES256','ML-DSA-44','ML-DSA-65','ML-DSA-87'].includes(algorithm))throw fail()
+ const pinned=options.verificationMethodId===undefined?undefined:localMethodId(options.verificationMethodId,did)
+ const document=await configuredDocument(did,options),methods=new Map<string,Row>()
+ if(!Array.isArray(document.authentication)||!Array.isArray(document.verificationMethod))throw fail()
+ for(const value of document.verificationMethod){
+  const method=row(value),raw=text(method.id),id=raw.startsWith('#')?localMethodId(raw,did):raw
+  if(methods.has(id))throw fail()
+  methods.set(id,method)
+ }
+ const candidates=new Map<string,Row>()
+ for(const reference of document.authentication){
+  const id=localMethodId(typeof reference==='string'?reference:row(reference).id,did)
+  if(pinned!==undefined&&id!==pinned)continue
+  const embedded=typeof reference==='string'?undefined:row(reference),top=methods.get(id),method=embedded??top
+  if(!method||method.controller!==did||!text(method.type))throw fail()
+  const key=row(method.publicKeyJwk)
+  if(key.alg!==algorithm)continue
+  if(['d','k','dBytes','privBytes','priv','privateKey','secretKeyBytes'].some(field=>field in key)||key.use!==undefined&&key.use!=='sig')throw fail()
+  const fragment=id.slice(did.length+1),kid=key.kid===undefined?fragment:text(key.kid)
+  if(kid!==fragment&&kid!==id)throw fail()
+  if(algorithm==='ES384'||algorithm==='ES256'){
+   const size=algorithm==='ES384'?48:32
+   if(key.kty!=='EC'||key.crv!==(algorithm==='ES384'?'P-384':'P-256'))throw fail()
+   for(const field of ['x','y']){const coordinate=text(key[field]),bytes=Buffer.from(coordinate,'base64url');if(bytes.length!==size||bytes.toString('base64url')!==coordinate)throw fail()}
+  }else if(key.kty!=='AKP'||typeof key.pub!=='string'||!key.pub)throw fail()
+  if(embedded&&top){const other=row(top.publicKeyJwk);if(top.controller!==did||['kty','alg','crv','x','y','pub','kid','use'].some(field=>other[field]!==key[field]))throw fail()}
+  const prior=candidates.get(id)
+  if(prior&&['kty','alg','crv','x','y','pub','kid','use'].some(field=>prior[field]!==key[field]))throw fail()
+  candidates.set(id,{...key,kid})
+ }
+ if(candidates.size!==1)throw fail()
+ const selected=[...candidates.values()][0]!
+ if(algorithm==='ES384'||algorithm==='ES256')return {kty:'EC',crv:text(selected.crv),x:text(selected.x),y:text(selected.y),alg:algorithm,kid:text(selected.kid),use:'sig'}
+ return {kty:'AKP',alg:algorithm,pub:text(selected.pub),kid:text(selected.kid),use:'sig'}
 }

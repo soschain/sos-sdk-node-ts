@@ -1,7 +1,7 @@
 // Flow contract: one existing actor unlocks registered custody, discovers only provider-confirmed subjects through real encrypted HTTP protocol bytes, obtains exact subject-bound SMART authorization using its normal ES384 client-assertion key, and resolves/reset/revokes the same sealed session. The HTTP peer is synthetic protocol evidence, not online GW acceptance.
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
-import {createHash,createPublicKey,randomBytes,randomUUID,verify} from 'node:crypto'
+import {createHash,createPublicKey,generateKeyPairSync,randomBytes,randomUUID,sign,verify} from 'node:crypto'
 import test from 'node:test'
 import {CryptographyService} from 'antifraud-data-utils-ts/cryptography'
 import {encodeMultibaseSha3} from 'antifraud-data-utils-ts/encoding'
@@ -30,10 +30,12 @@ const secondBytes=Uint8Array.from(secondUuid.replaceAll('-','').match(/../gu),pa
 const secondPatient=`${providerDid}:individual:multibase:${encodeMultibaseSha3(secondBytes,384)}`
 const requestedScope=buildScopeSmartCompositionAccess({subjectDid:alias,accessVerb:'rs'})
 const canonicalScope=buildScopeSmartCompositionAccess({subjectDid:patient,accessVerb:'rs'})
+const requestedCrud=buildScopeSmartCompositionAccess({subjectDid:alias,accessVerb:'cruds'})
+const canonicalCrud=buildScopeSmartCompositionAccess({subjectDid:patient,accessVerb:'cruds'})
 const baseUrl=safe.httpsBaseUrl,smartPath=`/${route.tenantId}/cds-${route.jurisdiction}/v1/${route.sector}/identity/openid/smart/token`
 const accountToken='synthetic-host-verified-account-token'
 
-async function fixture(t){
+async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg}={}){
  const vault=new TransactionalMemoryVaultRepository(),sealer=createAesGcmProfileSealer(Buffer.alloc(32,19))
  const publicJwks=oracle.descriptors.filter(d=>d.purpose!=='document-at-rest').map(d=>structuredClone(d.publicJwk))
  const storagePublicJwk=structuredClone(oracle.descriptors.find(d=>d.purpose==='document-at-rest').publicJwk)
@@ -50,6 +52,9 @@ async function fixture(t){
  const material=createHash('sha512').update(`${peerSeed}:runtime:${runtimeId}:default:comm-signing:0`,'utf8').digest().subarray(0,32)
  const signing=await crypto.generateKeyPairMlDsa(material,'ML-DSA-44');material.fill(0)
  assert.equal(signing.publicJWKey.pub,peerPublic.signing.pub)
+ const ec=generateKeyPairSync('ec',{namedCurve:smartAlg==='ES256'?'prime256v1':'secp384r1'})
+ const ecWrong=generateKeyPairSync('ec',{namedCurve:smartAlg==='ES256'?'prime256v1':'secp384r1'})
+ const ecPublic={...ec.publicKey.export({format:'jwk'}),kid:'synthetic-smart-ec-key',alg:smartAlg,use:'sig'}
  t.after(()=>signing.secretKeyBytes.fill(0))
  const client=await openRegisteredCommunicationWallet({walletKeyDerivationId:seed.walletKeyDerivationId,unlockedWalletSeed:seed.walletSeed,registeredPublicJwks:publicJwks,resolveRecipientJwk:async did=>{assert.equal(did,providerDid);return peerPublic.encryption}})
  // Positive crypto setup control before any absent use-case module is loaded.
@@ -83,7 +88,7 @@ async function fixture(t){
    assert.equal(request.client_assertion_type,'private_key_jwt')
    assert.equal(request.acr_values,'urn:antifraud:acr:openid4vp:individual')
    assert.equal(request.purpose,'TREAT')
-   assert.ok([canonicalScope,buildScopeSmartCompositionAccess({subjectDid:secondPatient,accessVerb:'rs'})].includes(request.scope))
+   assert.ok([canonicalScope,`${canonicalScope} ${canonicalCrud}`,buildScopeSmartCompositionAccess({subjectDid:secondPatient,accessVerb:'rs'})].includes(request.scope))
    const selectedPatient=new URLSearchParams(request.scope.split('?')[1]).get('subject')
    const assertion=request.client_assertion.split('.'),header=JSON.parse(Buffer.from(assertion[0],'base64url')),claims=JSON.parse(Buffer.from(assertion[1],'base64url'))
    assert.equal(header.alg,'ES384');assert.equal(header.kid,assertionKey.kid)
@@ -92,10 +97,19 @@ async function fixture(t){
    assert.equal(claims.exp-claims.iat,300);assert.ok(claims.jti)
    started?.();if(gate)await gate
    if(fault==='consent')return new Response(JSON.stringify({error:'consent_missing'}),{status:403})
-   const seconds=Math.floor(now/1000),scope=fault==='scope'?`${request.scope} user/Observation.cruds`:request.scope
+   const seconds=Math.floor(now/1000),scope=fault==='scope'?`${request.scope} user/Observation.cruds`:fault==='broader-cruds'?`${canonicalScope} ${canonicalCrud}`:fault==='narrow-grant'?canonicalScope:request.scope
    const tokenClaims={iss:providerDid,sub:actorDid,aud:fault==='token-audience'?`${providerDid}:foreign`:providerDid,scope,jti:fault==='replayed-token'?'synthetic-other-operation':job.message.jti,iat:seconds,nbf:seconds,exp:fault==='expired-token'?seconds-1:seconds+120}
-   const signed=await crypto.signDataJws(tokenClaims,{alg:'ML-DSA-44',kid:peerPublic.signing.kid,typ:'JWT'},signing.secretKeyBytes)
-   body={access_token:`${signed.protected}.${signed.payload}.${signed.signature}`,token_type:'Bearer',expires_in:120,scope,subject:fault==='patient'?`${selectedPatient}:foreign`:selectedPatient}
+   let accessToken
+   if(smartAlg==='ES384'||smartAlg==='ES256'){
+    const header={alg:smartAlg,kid:fault==='smart-header-kid'?'synthetic-foreign-kid':ecPublic.kid,typ:'JWT'}
+    const signingInput=`${Buffer.from(JSON.stringify(header)).toString('base64url')}.${Buffer.from(JSON.stringify(tokenClaims)).toString('base64url')}`
+    accessToken=`${signingInput}.${sign(smartAlg==='ES256'?'sha256':'sha384',Buffer.from(signingInput),{key:ec.privateKey,dsaEncoding:'ieee-p1363'}).toString('base64url')}`
+    assert.equal(verify(smartAlg==='ES256'?'sha256':'sha384',Buffer.from(signingInput),{key:ec.publicKey,dsaEncoding:'ieee-p1363'},Buffer.from(accessToken.split('.')[2],'base64url')),true)
+   }else{
+    const signed=await crypto.signDataJws(tokenClaims,{alg:'ML-DSA-44',kid:peerPublic.signing.kid,typ:'JWT'},signing.secretKeyBytes)
+    accessToken=`${signed.protected}.${signed.payload}.${signed.signature}`
+   }
+   body={access_token:accessToken,token_type:'Bearer',expires_in:120,scope,subject:fault==='patient'?`${selectedPatient}:foreign`:selectedPatient}
   }else if(job.path.includes('/License/'))body={data:[{resource:{data:[]}}]}
   else{
    assert.equal(job.message.aud,providerDid)
@@ -123,14 +137,20 @@ async function fixture(t){
   const encrypted=await peer.packForRecipientWithContext(response,actorDid,{context:peerContext})
   return new Response(JSON.stringify({response:encrypted}),{status:200})
  }
- const options={vault,sealer,collections:{profiles,sessions},now:()=>new Date(now),gateway:{baseUrl,providerDid,responseIssuer:providerDid,resolveRecipientJwk:async did=>{assert.equal(did,providerDid);return peerPublic.encryption},resolveGatewaySigningJwk:async did=>{assert.equal(did,providerDid);return peerPublic.signing}},fetchImpl,pollOptions:{intervalMs:0,timeoutMs:2000}}
+ const options={vault,sealer,collections:{profiles,sessions},now:()=>new Date(now),gateway:{baseUrl,providerDid,responseIssuer:providerDid,resolveRecipientJwk:async did=>{assert.equal(did,providerDid);return peerPublic.encryption},resolveGatewaySigningJwk:async did=>{assert.equal(did,providerDid);return peerPublic.signing},smartTokenVerification:{algorithm:policyAlg,resolveSigningJwk:async did=>{
+  assert.equal(did,providerDid)
+  if(smartAlg==='ML-DSA-44')return peerPublic.signing
+  if(fault==='smart-wrong-key')return {...ecWrong.publicKey.export({format:'jwk'}),alg:smartAlg,use:'sig',kid:ecPublic.kid}
+  if(fault==='smart-private-key')return {...ec.privateKey.export({format:'jwk'}),alg:smartAlg,use:'sig',kid:ecPublic.kid}
+  return ecPublic
+ }}},fetchImpl,pollOptions:{intervalMs:0,timeoutMs:2000}}
  return {vault,sealer,profile,options,state,readClient:async packed=>{
   const opened=await peer.unpackWithContext(packed,{context:peerContext})
   assert.equal(await crypto.verifyJws(opened.meta.jws.compact,clientSigning),true)
   return opened.content
  },reply:message=>peer.packForRecipientWithContext(message,actorDid,{context:peerContext})}
 }
-async function begin(t){const f=await fixture(t),{RegisteredProfileAccess}=await load(),access=new RegisteredProfileAccess(f.options);const actor=await access.unlockActorProfile({...binding,pin});return {...f,access,sessionId:actor.sessionId}}
+async function begin(t,options){const f=await fixture(t,options),{RegisteredProfileAccess}=await load(),access=new RegisteredProfileAccess(f.options);const actor=await access.unlockActorProfile({...binding,pin});return {...f,access,sessionId:actor.sessionId}}
 const request=(sessionId)=>({...binding,sessionId,idToken:accountToken})
 
 test('drives unlock, registered encrypted discovery, exact-key SMART selection and reset with bounded token lifetime',async t=>{
@@ -238,4 +258,42 @@ test('directory refresh persists new aliases and selected profile views retain e
  assert.deepEqual(await self.confidentialStorageAdapter.unprotect(await self.confidentialStorageAdapter.protect(document)),document)
  await assert.rejects(controlled.secureTransportAdapter.pack({thid:'synthetic-obsolete-card',aud:providerDid,body:{subject:patient}}))
  assert.equal((await f.vault.get(profiles,binding.profileId)).actorMode,'controller')
+})
+
+test('accepts the actual client rs and cruds pair while preserving a narrower signed grant',async t=>{
+ const f=await begin(t)
+ await f.access.refreshAuthorizedSubjects({...request(f.sessionId),verifiedContact:{email:safe.firstContactEmail}})
+ const complete=await f.access.selectAuthorizedSubject({...request(f.sessionId),subjectDid:alias,scopes:[requestedScope,requestedCrud]})
+ assert.deepEqual(complete.scopes,[canonicalScope,canonicalCrud])
+ f.state.setFault('narrow-grant')
+ const selected=await f.access.selectAuthorizedSubject({...request(f.sessionId),subjectDid:alias,scopes:[requestedScope,requestedCrud]})
+ assert.deepEqual(selected.scopes,[canonicalScope])
+ assert.deepEqual((await f.access.resolveSession({...binding,sessionId:f.sessionId})).scopes,[canonicalScope])
+ f.state.setFault('broader-cruds')
+ await assert.rejects(f.access.selectAuthorizedSubject({...request(f.sessionId),subjectDid:alias,scopes:[requestedScope]}))
+ assert.deepEqual((await f.access.resolveSession({...binding,sessionId:f.sessionId})).scopes,[canonicalScope])
+})
+
+test('verifies independently configured ES384 SMART while outer registered transport remains PQC',async t=>{
+ const f=await begin(t,{smartAlg:'ES384'})
+ await f.access.refreshAuthorizedSubjects({...request(f.sessionId),verifiedContact:{email:safe.firstContactEmail}})
+ const selected=await f.access.selectAuthorizedSubject({...request(f.sessionId),subjectDid:alias,scopes:[requestedScope]})
+ assert.equal(JSON.parse(Buffer.from(selected.accessToken.split('.')[0],'base64url')).alg,'ES384')
+ assert.equal((await f.access.resolveSession({...binding,sessionId:f.sessionId})).subjectDid,patient)
+})
+
+test('explicit ES256 policy retains compatibility and rejects foreign EC material, private fields, kid and policy mismatch',async t=>{
+ const f=await begin(t,{smartAlg:'ES256'})
+ await f.access.refreshAuthorizedSubjects({...request(f.sessionId),verifiedContact:{email:safe.firstContactEmail}})
+ assert.equal((await f.access.selectAuthorizedSubject({...request(f.sessionId),subjectDid:alias,scopes:[requestedScope]})).subjectDid,patient)
+ for(const fault of ['smart-wrong-key','smart-private-key','smart-header-kid']){
+  const invalid=await begin(t,{smartAlg:'ES384'})
+  await invalid.access.refreshAuthorizedSubjects({...request(invalid.sessionId),verifiedContact:{email:safe.firstContactEmail}})
+  invalid.state.setFault(fault)
+  await assert.rejects(invalid.access.selectAuthorizedSubject({...request(invalid.sessionId),subjectDid:alias,scopes:[requestedScope]}))
+  assert.equal((await invalid.vault.get(sessions,invalid.sessionId)).sealedAccessToken,undefined)
+ }
+ const wrongPolicy=await begin(t,{smartAlg:'ES256',policyAlg:'ES384'})
+ await wrongPolicy.access.refreshAuthorizedSubjects({...request(wrongPolicy.sessionId),verifiedContact:{email:safe.firstContactEmail}})
+ await assert.rejects(wrongPolicy.access.selectAuthorizedSubject({...request(wrongPolicy.sessionId),subjectDid:alias,scopes:[requestedScope]}))
 })

@@ -1,6 +1,7 @@
 // Flow contract: actual BFF projections need trusted profile/route/role/aliases
 // and structural encrypted transport plus metadata-preserving document ports.
-import type {RegisteredProfileAccess} from 'sos-sdk-node-ts/registered-profile-access'
+import type {RegisteredProfileAccess,RegisteredProfileAccessOptions} from 'sos-sdk-node-ts/registered-profile-access'
+import {resolveRegisteredSmartTokenSigningJwk,type RegisteredSmartTokenAlgorithm} from 'sos-sdk-node-ts/registered-did-keys'
 import type {RegisteredProfileBinding} from 'sos-data-utils-ts/registered-profile-contract'
 async function consume(access:RegisteredProfileAccess,binding:RegisteredProfileBinding,sessionId:string){
  const session=await access.resolveSession({...binding,sessionId})
@@ -17,3 +18,7 @@ async function consume(access:RegisteredProfileAccess,binding:RegisteredProfileB
  return {profile,gateway,id,channelId,subjects,actorMode:session.actorMode,attester:session.attester}
 }
 void consume
+const smartPolicy:RegisteredProfileAccessOptions['gateway']['smartTokenVerification']={algorithm:'ES384',resolveSigningJwk:providerDid=>resolveRegisteredSmartTokenSigningJwk(providerDid,{algorithm:'ES384'})}
+// @ts-expect-error Unconfigured signature algorithms are not SMART policy.
+const unsupported:RegisteredSmartTokenAlgorithm='RS256'
+void smartPolicy;void unsupported
