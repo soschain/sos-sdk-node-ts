@@ -13,6 +13,13 @@ versions and commit lockfiles on `main` -> staging**. Never publish to discover
 deterministic failures and never commit a local package reference. Staging
 begins only after exact registry packages are installed and verified.
 
+Scope the affected matrix by access path. Demo requires relevant local Demo
+checks, exact registry dependencies/lockfiles and portal build, then online
+Demo deployment. Run dev:staging/Test Network lifecycle checks afterward and
+redeploy fixes; they do not hold Demo or establish Test Network/production
+readiness. Demo remains BFF-only; network cases retain their GW/Fabric gates.
+No-GDC architecture, authentication, privacy and custody remain mandatory.
+
 
 ## Mandatory TDD
 
