@@ -181,7 +181,7 @@ export class WorkforceClient{
   },`workforce-dcr-${randomUUID()}`,false,'openid-dcr-request'),this.options.dcrResponseIssuer,pollOptions,initialAccessToken)
   const rows=gatewayResponseEntries(registration.poll.body),devices=rows.filter(row=>record(row.resource)?.resourceType==='Device'&&['200','201'].includes(String(record(row.response)?.status)))
   const device=record(devices[0]?.resource),clientId=text(device?.client_id)
-  if(devices.length!==1||!device||!clientId||device.id!==clientId||!text(device.registration_access_token)||!text(device.registration_client_uri))throw new Error('workforce_device_registration_binding_invalid')
+  if(devices.length!==1||!device||!clientId||device.id!==clientId||(Object.hasOwn(device,'registration_access_token')&&!text(device.registration_access_token))||!text(device.registration_client_uri))throw new Error('workforce_device_registration_binding_invalid')
   return {token,registration,clientId,employeeDid:grant.employeeDid,role:grant.employeeRoleCode,routeContext:grant.routeContext}
  }
 }

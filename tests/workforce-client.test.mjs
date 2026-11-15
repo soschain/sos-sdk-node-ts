@@ -113,7 +113,7 @@ test('rejects changing the grant role while retaining the dentist actor before a
  assert.equal(calls,0)
 })
 
-for(const {includeActorSigning,loopback} of [{includeActorSigning:false,loopback:false},{includeActorSigning:true,loopback:false},{includeActorSigning:true,loopback:true}])test(`recipient registers exact actor/profile keys without Employee mutation; actor-signing=${includeActorSigning}; loopback=${loopback}`,async()=>{
+for(const {includeActorSigning,loopback,omitManagementToken=false,registrationManagementToken='synthetic-registration-token',malformed=false} of [{includeActorSigning:false,loopback:false},{includeActorSigning:true,loopback:false},{includeActorSigning:true,loopback:true},{includeActorSigning:true,loopback:false,omitManagementToken:true},{includeActorSigning:true,loopback:false,registrationManagementToken:'',malformed:true},{includeActorSigning:true,loopback:false,registrationManagementToken:42,malformed:true}])test(`recipient registers exact actor/profile keys without Employee mutation; actor-signing=${includeActorSigning}; loopback=${loopback}; optional-RAT-absent=${omitManagementToken}; malformed=${malformed}; token-type=${typeof registrationManagementToken}`,async()=>{
  const messages=[]
  const grant=createEmployeeActivationGrant({...phone,employeeDid:employeeDid(phone),employeeRoleCode:role,providerDid,routeContext:ctx,
   createdAt:new Date(),expiresAt:new Date(Date.now()+60000)})
@@ -133,7 +133,7 @@ for(const {includeActorSigning,loopback} of [{includeActorSigning:false,loopback
   }
   assert.equal(req.headers.authorization,'Bearer synthetic-initial-access-token')
   if(req.url.endsWith('-response'))reply(res,envelope(message,gatewayDid,[{type:'openid-dcr-request',response:{status:'201'},resource:{
-   resourceType:'Device',id:'synthetic-client',client_id:'synthetic-client',registration_access_token:'synthetic-registration-token',registration_client_uri:'https://example.invalid/registration'}}]))
+   resourceType:'Device',id:'synthetic-client',client_id:'synthetic-client',...(omitManagementToken?{}:{registration_access_token:registrationManagementToken}),registration_client_uri:'https://example.invalid/registration'}}]))
   else{
    assert.equal(message.body.actor_did,grant.employeeDid)
    assert.equal(message.body.profile_did,grant.employeeDid)
@@ -143,9 +143,11 @@ for(const {includeActorSigning,loopback} of [{includeActorSigning:false,loopback
    res.writeHead(202);res.end('{}')
   }
  },async baseUrl=>{
-  const result=await new WorkforceClient({...options(baseUrl),issuerDid:grant.employeeDid,bearerToken:'synthetic-verified-recipient-token',
+  const pending=new WorkforceClient({...options(baseUrl),issuerDid:grant.employeeDid,bearerToken:'synthetic-verified-recipient-token',
    clientId:undefined,tenantIssuer:undefined,transportProfile:'pre-dcr-didcomm-encrypted',secureTransportAdapter:adapter,allowLoopbackRedirectUris:loopback}).enrollEmployeeDevice({grant,verifiedContact:phone,activationCode:'synthetic-activation-code',
     clientInstanceId:'synthetic-installation',publicJwks,redirectUris},{intervalMs:0})
+  if(malformed){await assert.rejects(pending,/workforce_device_registration_binding_invalid/u);return}
+  const result=await pending
   assert.equal(result.clientId,'synthetic-client')
   assert.equal(result.employeeDid,grant.employeeDid)
   assert.equal(result.role,role)
