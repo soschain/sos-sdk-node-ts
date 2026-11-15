@@ -12,6 +12,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./controller-governance-signer": {
+      "types": "./dist/controller-governance-signer.d.ts",
+      "default": "./dist/controller-governance-signer.js"
+    },
+    "./runtime-access-token-signer": {
+      "types": "./dist/runtime-access-token-signer.d.ts",
+      "default": "./dist/runtime-access-token-signer.js"
+    },
     "./registered-profile-sessions": {
       "types": "./dist/registered-profile-sessions.d.ts",
       "default": "./dist/registered-profile-sessions.js"

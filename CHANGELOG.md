@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add separate fixed-purpose controller governance ML-DSA-65 detached signing
+  and runtime ML-DSA-44 access-token signing, retaining derivation/key identities
+  and wire profiles without changing normal profile keys or host authority.
+
 - Add registered confidential document custody over the existing compact-JWE
   profile, preserving document-key and effective-owner bindings, historical
   protected headers and outer row metadata without returning private keys.
