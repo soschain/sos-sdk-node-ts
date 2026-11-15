@@ -31,6 +31,14 @@ match `payload.client_id`. The VP closure embeds its public JWK. The caller
 still builds the correct canonical payload and checks the selected profile,
 subject and role; no credential authority is inferred or granted by signing.
 
+`signActorDetachedJws` signs the caller's exact credential string or byte payload
+with the actor key and the existing detached `application/vc+ld+json` profile:
+`b64:false` and `crit:['b64']`. `signIdentityPresentationJws` signs the caller's
+unchanged identity-presentation claims with the separate VP key and fixed
+`application/vp+jwt` type, without inserting `client_id` or an embedded key.
+These operations do not weaken the two client-bound methods above. The host
+still owns holder, audience, nonce, credential and responsibility checks.
+
 Private material is never returned. This helper does not replace the existing
 communication wallet, perform DCR, encrypt documents or establish evidence
 readiness. Its document public key is a compatibility descriptor, not proof
