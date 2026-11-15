@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Accept device enrollment responses without an optional registration management
+  token, matching the gateway's actual response. Reject malformed tokens when
+  present; retain contact, route, public-key and verified-response admission.
+
 - Expose the existing frozen registered-client transport profile through the
   public SDK root, preserving the original form media value and implementation.
 
