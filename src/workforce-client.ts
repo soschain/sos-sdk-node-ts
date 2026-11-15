@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto'
+import {DeviceEnrollmentClient,DeviceEnrollmentSubmitError} from './device-enrollment-client.js'
 import {buildOrganizationEmployeeDidWeb,buildStableActorIdentifier,normalizeActorContact,normalizeUuid,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
 import {SchemaOrgPersonClaim as Person,SchemaOrgIndividualProductClaim as Product,SchemaOrgOfferClaim as Offer} from 'antifraud-data-utils-ts/schema-org-claims'
 import {getHealthcareRoleByClaim} from 'sos-data-utils-ts/healthcare-roles'
@@ -19,58 +20,6 @@ function contactClaims(contact:ActorContactInput):Row{return {[contact.contactKi
 function sameContact(row:Row,contact:ActorContactInput):boolean{
  const value=claims(row)[contact.contactKind==='phone'?Person.Telephone:Person.Email]
  try{return typeof value==='string'&&buildStableActorIdentifier({...contact,contact:value})===buildStableActorIdentifier(contact)}catch{return false}
-}
-function publicKeySnapshot(value:unknown):Row{
- const failure=()=>new TypeError('workforce_device_public_keys_required')
- if(!value||typeof value!=='object'||Array.isArray(value))throw failure()
- const descriptors=Object.getOwnPropertyDescriptors(value)
- if(Object.values(descriptors).some(descriptor=>!Object.hasOwn(descriptor,'value')))throw failure()
- const key:Row=Object.fromEntries(Object.entries(descriptors).map(([name,descriptor])=>[name,descriptor.value]))
- if(['d','dBytes','privBytes','priv','privateKey','secretKeyBytes','k'].some(field=>field in key)
-  ||!text(key.kid)||key.kid!==text(key.kid))throw failure()
- // Supported operational JWK metadata is scalar or a string array, such as key_ops.
- if(Object.values(key).some(item=>item!==undefined&&item!==null&&typeof item!=='string'&&typeof item!=='boolean'
-  &&!(Array.isArray(item)&&item.every(part=>typeof part==='string'))))throw failure()
- return key
-}
-const keyMaterial=(key:Row)=>JSON.stringify(Object.keys(key).sort().map(name=>[name,key[name]]))
-function devicePublicKeys(input:readonly Readonly<Row>[],descriptors?:readonly ServerProfileKeyDescriptor[]):Row[]{
- const failure=()=>new TypeError('workforce_device_public_keys_required')
- if(!Array.isArray(input)||![2,3,5].includes(input.length))throw failure()
- const keys=input.map(publicKeySnapshot)
- if(new Set(keys.map(key=>key.kid)).size!==keys.length)throw failure()
- const communicationSigning=keys.filter(key=>key.kty==='AKP'&&typeof key.pub==='string'&&!!key.pub)
- const communicationEncryption=keys.filter(key=>key.kty==='OKP'&&typeof key.x==='string'&&!!key.x)
- const profileSigning=keys.filter(key=>key.kty==='EC'&&key.crv==='P-384'&&key.alg==='ES384'
-  &&typeof key.x==='string'&&!!key.x&&typeof key.y==='string'&&!!key.y&&(key.use===undefined||key.use==='sig'))
- if(communicationSigning.length!==1||communicationEncryption.length!==1||profileSigning.length!==keys.length-2)throw failure()
- if(!descriptors){if(keys.length===5)throw new Error('workforce_key_purpose_binding_required');return keys}
- const purposeFailure=()=>new Error('workforce_key_purpose_binding_invalid')
- if(!Array.isArray(descriptors)||descriptors.length<keys.length||descriptors.length>keys.length+1)throw purposeFailure()
- const required=new Map<string,readonly [string,string,string]>([
-  ['comm-signing',['runtime','ML-DSA-44','sig']],['comm-encryption',['runtime','ML-KEM-768','enc']],
-  ...(keys.length>=3?[['actor-signing',['profile','ES384','sig']] as const]:[]),
-  ...(keys.length===5?[['openid-id-token-signing',['runtime','ES384','sig']] as const,['vp-token-signing',['runtime','ES384','sig']] as const]:[]),
- ])
- const seen=new Set<string>(),descriptorKids=new Set<string>()
- for(const descriptor of descriptors){
-  if(!descriptor||typeof descriptor!=='object')throw purposeFailure()
-  const key=publicKeySnapshot(descriptor.publicJwk)
-  if(descriptorKids.has(descriptor.kid)||descriptor.kid!==key.kid
-   ||(key.alg??key.crv)!==descriptor.alg||(key.use!==undefined&&key.use!==descriptor.use))throw purposeFailure()
-  descriptorKids.add(descriptor.kid)
-  if(descriptor.purpose==='document-at-rest'){
-   if(descriptor.ownerScope!=='profile'||descriptor.alg!=='ML-KEM-768'||descriptor.use!=='enc'
-    ||key.kty!=='OKP'||key.crv!=='ML-KEM-768'||typeof key.x!=='string'||keys.some(candidate=>candidate.kid===key.kid))throw purposeFailure()
-   continue
-  }
-  const expected=required.get(descriptor.purpose),candidate=keys.find(item=>item.kid===descriptor.kid)
-  if(!expected||seen.has(descriptor.purpose)||descriptor.ownerScope!==expected[0]||descriptor.alg!==expected[1]||descriptor.use!==expected[2]
-   ||!candidate||keyMaterial(candidate)!==keyMaterial(key))throw purposeFailure()
-  seen.add(descriptor.purpose)
- }
- if(seen.size!==required.size)throw purposeFailure()
- return keys
 }
 export class WorkforceSubmitError extends Error{
  constructor(readonly status:number,readonly body:unknown){super(`workforce_gateway_failed:${status}`)}
@@ -162,26 +111,11 @@ export class WorkforceClient{
    ||(['tenantId','jurisdiction','sector'] as const).some(key=>grant.routeContext[key]!==this.options.ctx[key]))throw new Error('workforce_recipient_route_binding_invalid')
   if(!getHealthcareRoleByClaim(grant.employeeRoleCode)||!Number.isFinite(Date.parse(grant.expiresAt))||Date.parse(grant.expiresAt)<=Date.now())throw new Error('workforce_recipient_grant_invalid')
   if(buildOrganizationEmployeeDidWeb({...input.verifiedContact,organizationDidWeb:grant.providerDid,role:grant.employeeRoleCode})!==grant.employeeDid)throw new Error('workforce_recipient_role_binding_invalid')
-  const activationCode=requireText(input.activationCode,'workforce_activation_code_required'),clientInstanceId=requireText(input.clientInstanceId,'workforce_installation_required')
-  const publicJwks=devicePublicKeys(input.publicJwks,input.enrollmentKeyDescriptors)
-  if(!Array.isArray(input.redirectUris)||!input.redirectUris.length||input.redirectUris.some(uri=>{try{
-   const parsed=new URL(uri)
-   const allowed=parsed.protocol==='https:'||(this.options.allowLoopbackRedirectUris===true&&parsed.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(parsed.hostname))
-   return !allowed||!!parsed.username||!!parsed.password||!!parsed.hash
-  }catch{return true}}))throw new TypeError('workforce_device_redirects_invalid')
-  const token=await this.transport.exchange(`${this.prefix}/identity/openid/Token/_exchange`,this.message({
-   grant_type:'urn:ietf:params:oauth:grant-type:token-exchange',subject_token:activationCode,client_instance_id:clientInstanceId,
-  },`workforce-token-${randomUUID()}`,false),this.options.providerDid,pollOptions)
-  const tokenBody=record(record(token.poll.body)?.body),initialAccessToken=text(tokenBody?.initial_access_token)
-  if(!initialAccessToken||tokenBody?.token_type!=='Bearer'||tokenBody.scope!=='dcr:register'||!Number.isFinite(tokenBody.expires_in)||Number(tokenBody.expires_in)<=0)throw new Error('workforce_initial_access_token_invalid')
-  const registration=await this.transport.exchange(`${this.prefix}/identity/openid/Device/_dcr`,this.message({
-   code:activationCode,redirect_uris:[...input.redirectUris],jwks:{keys:structuredClone(publicJwks)},application_type:'web',
-   token_endpoint_auth_method:'private_key_jwt',actor_did:grant.employeeDid,profile_did:grant.employeeDid,
-   ext_device_info:{device_id:clientInstanceId},
-  },`workforce-dcr-${randomUUID()}`,false,'openid-dcr-request'),this.options.dcrResponseIssuer,pollOptions,initialAccessToken)
-  const rows=gatewayResponseEntries(registration.poll.body),devices=rows.filter(row=>record(row.resource)?.resourceType==='Device'&&['200','201'].includes(String(record(row.response)?.status)))
-  const device=record(devices[0]?.resource),clientId=text(device?.client_id)
-  if(devices.length!==1||!device||!clientId||device.id!==clientId||(Object.hasOwn(device,'registration_access_token')&&!text(device.registration_access_token))||!text(device.registration_client_uri))throw new Error('workforce_device_registration_binding_invalid')
-  return {token,registration,clientId,employeeDid:grant.employeeDid,role:grant.employeeRoleCode,routeContext:grant.routeContext}
+  try{
+   const result=await new DeviceEnrollmentClient({...this.options,transportProfile:'pre-dcr-didcomm-encrypted',
+    expectedProfile:{actorDid:grant.employeeDid,profileDid:grant.employeeDid,contact:input.verifiedContact},errorPrefix:'workforce',
+   }).enroll(input,pollOptions)
+   return {...result,employeeDid:grant.employeeDid,role:grant.employeeRoleCode,routeContext:grant.routeContext}
+  }catch(error){if(error instanceof DeviceEnrollmentSubmitError)throw new WorkforceSubmitError(error.status,error.body);throw error}
  }
 }
