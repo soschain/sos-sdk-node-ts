@@ -12,6 +12,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./registered-profile-sessions": {
+      "types": "./dist/registered-profile-sessions.d.ts",
+      "default": "./dist/registered-profile-sessions.js"
+    },
     "./server-profile-custody-keys": {
       "types": "./dist/server-profile-custody-keys.d.ts",
       "default": "./dist/server-profile-custody-keys.js"
