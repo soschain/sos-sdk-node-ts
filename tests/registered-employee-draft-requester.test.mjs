@@ -76,6 +76,18 @@ test('binds recorded role, provider, route and tenant issuer to the actual regis
   await s.vault.put(collections.enrollmentGrants,{...s.grant,...patch});await assert.rejects(resolve(s.options,s.input))
  }
 })
+test('requires nonempty persisted issuer strings even when both records omit or empty them',async()=>{
+ const s=await setup(),resolve=need();let unseals=0
+ const options={...s.options,sealer:{seal:s.sealer.seal,unseal:async(...args)=>{unseals++;return s.sealer.unseal(...args)}}}
+ const {tenantIssuer:_profileIssuer,...profile}=s.profile,{tenantIssuer:_grantIssuer,...grant}=s.grant
+ for(const issuer of[undefined,'',' ',null,0,false]){
+  await s.vault.put(collections.profiles,issuer===undefined?profile:{...profile,tenantIssuer:issuer})
+  await s.vault.put(collections.enrollmentGrants,issuer===undefined?grant:{...grant,tenantIssuer:issuer})
+  await assert.rejects(resolve(options,s.input),api.RegisteredEmployeeDraftRequesterDeniedError)
+ }
+ assert.equal(unseals,0)
+})
+
 test('verifies full registered custody rather than matching only one public kid',async()=>{
  const s=await setup(),resolve=need()
  await s.vault.put(collections.profiles,{...s.profile,publicJwks:s.profile.publicJwks.map(key=>key.alg==='ES384'?{...key,x:'synthetic-changed-public-material'}:key)})

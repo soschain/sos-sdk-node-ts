@@ -98,7 +98,7 @@ async function resolve(options:RegisteredEmployeeDraftRequesterOptions,input:Reg
   if(matches.length!==1)throw denied()
   const grant=matches[0]!
   text(grant.id)
-  if(grant.version!==EmployeeActivationGrantVersions.V1||grant.employeeDid!==actorDid||grant.providerDid!==providerDid||!sameRoute(route(grant.routeContext),context)||grant.tenantIssuer!==profile.tenantIssuer)throw denied()
+  if(grant.version!==EmployeeActivationGrantVersions.V1||grant.employeeDid!==actorDid||grant.providerDid!==providerDid||!sameRoute(route(grant.routeContext),context)||text(grant.tenantIssuer)!==text(profile.tenantIssuer))throw denied()
   if(grant.accessPath!==undefined&&grant.accessPath!=='test-network')throw denied()
   // These dates validate the retained invitation record, not current access.
   // Its completed DCR tuple remains usable after invitation expiry.

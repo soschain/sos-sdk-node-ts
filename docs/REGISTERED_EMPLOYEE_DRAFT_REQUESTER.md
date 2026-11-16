@@ -23,6 +23,9 @@ then atomically stores the profile and the grant's existing
 requester operation requires exactly one matching completed tuple, identical
 profile/grant provider, route and issuer, and the canonical employee DID for
 the recorded role and verified contact.
+Both records must contain a nonempty issuer string. Matching missing values
+cannot replace the issuer required by enrollment; the operation compares the
+stored values without changing them or assuming the issuer is the host root DID.
 
 Invitation `createdAt` and `expiresAt` retain their original meaning: they
 bounded admission to enrollment. Expiring the invitation does not expire an
