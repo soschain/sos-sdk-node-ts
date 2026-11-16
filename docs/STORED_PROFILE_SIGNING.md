@@ -16,6 +16,8 @@ representation and operation-specific permission. In particular, selecting a
 signing profile does not establish those permissions. Individual claims bind
 the issuer, subject and VP holder to the stored actor, while the command's
 subject binds the selected session and accepted SMART scopes.
+The selected session and its directory assignment must carry the same known
+relationship mode; missing or unknown modes are rejected.
 
 ## Existing records and custody
 

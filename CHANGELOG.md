@@ -6,6 +6,7 @@
   organization detached ES384 profiles. Preserve existing seed derivation,
   session AAD, public keys and revision-zero rows; recheck current profile and
   session state after unsealing before returning a public-only signature result.
+  Reject selected-session rows with missing or unknown relationship modes.
 
 ## 0.5.4
 

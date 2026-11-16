@@ -112,6 +112,7 @@ export async function signStoredProfilePayload(options:StoredProfileSigningOptio
   if(presentation){
    if(profile.actorKind!==ActorKinds.IndividualController||!['self','controller'].includes(String(profile.actorMode)))throw denied()
    const transportSubject=text(session.subjectDid),selected=text(session.selectedSubjectDid??session.subjectDid)
+   if(!['self','controller','member'].some(mode=>mode===session.actorMode))throw denied()
    if(subject!==selected||!Array.isArray(session.scopes)||!session.scopes.length||!session.sealedAccessToken)throw denied()
    if(!Array.isArray(session.authorizedSubjectDids)||!session.authorizedSubjectDids.includes(selected)||!Array.isArray(session.authorizedSubjects))throw denied()
    const assignments=session.authorizedSubjects.map(own).filter(entry=>entry.subjectDid===selected&&entry.transportSubjectDid===transportSubject)

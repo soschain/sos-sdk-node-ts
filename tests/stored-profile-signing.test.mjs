@@ -71,7 +71,10 @@ test('denies crossed owner/profile/actor/provider/route before host unseal',asyn
 test('denies malformed/expired/revision-stale sessions and preserves other rows',async()=>{
  const s=await setup();const sign=need();const foreign={...s.session,id:'synthetic-foreign-session',sessionId:'synthetic-foreign-session',ownerId:'synthetic-other-owner'}
  await s.vault.put(registeredSessions,foreign)
- for(const patch of [{expiresAt:'synthetic-invalid-date'},{expiresAt:'2000-01-01T00:00:00Z'},{credentialRevision:1}]){
+ for(const patch of [{expiresAt:'synthetic-invalid-date'},{expiresAt:'2000-01-01T00:00:00Z'},{credentialRevision:1},
+  {actorMode:undefined,authorizedSubjects:[{subjectDid:subject,transportSubjectDid:subject}]},
+  {actorMode:'synthetic-unknown-mode',authorizedSubjects:[{subjectDid:subject,transportSubjectDid:subject,actorMode:'synthetic-unknown-mode'}]},
+ ]){
   await s.vault.put(registeredSessions,{...s.session,...patch});await assert.rejects(sign(s.options,presentation()))
  }
  assert.deepEqual(await s.vault.get(registeredSessions,foreign.id),foreign)
