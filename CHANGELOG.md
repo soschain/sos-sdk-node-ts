@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1
 
 - Pin the verified Antifraud 0.3.2 and SOS Data 0.8.1 registry contracts while
   retaining Core 0.7.0 and all other direct runtime dependency versions.
