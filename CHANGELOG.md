@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add a purpose-fixed emergency request vault transaction using the shared Core
+  ServiceRequest/triage plan and optional literal patient Communication. Keep
+  actor-bound retry receipts, subject equivalence, access callbacks and atomic
+  rollback; preserve existing Encounter transactions and authorized links.
+
 ## 0.5.3
 
 - Pin verified Antifraud 0.3.3 and SOS Data 0.8.2 registry contracts while

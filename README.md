@@ -265,6 +265,16 @@ Task writes require their own authorization. The optional delivery hook runs
 once per atomic operation, even when both Task and Encounter notices are saved. Hidden provider records cannot be
 replaced by reusing their references. Direct generic history writes are denied.
 
+`PortalCareVaultProvider.requestEmergency` and the `emergency` peer operation
+consume the shared Core emergency input. One vault transaction stores the
+ServiceRequest, its triage Task and optional patient Communication, with a retry
+receipt bound to the actor and intake idempotency key. Literal body text remains
+separate from Narrative and notes. Existing Encounter references must resolve to
+authorized records; creating a request neither invents nor changes an Encounter.
+ServiceRequest and patient Communication writes use this transaction rather than
+generic resource saves. The BFF retains responsibility for current subject,
+service, recipient and role authority through the existing access callbacks.
+
 `sos-sdk-node-ts/portal-consent-vault` exposes `PortalConsentVaultProvider` over the same
 injected transactional vault repository, using a separate collection scoped by
 workspace, subject and generation. Store flat Consent claims. Native FHIR
