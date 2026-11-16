@@ -328,7 +328,24 @@ prevent two competing invitations from spending the same free seat.
 Set `requireLicenseCapacity: true` at host construction to require a persisted
 allocation before creating new seats. This option stays under host control.
 Existing providers retain their historical admission policy until configured
-for managed capacity. Vault capacity is an operational allocation; Network
+for managed capacity. A host selecting the existing trial offer calls
+`ensureTrialLicenseCapacity` to persist that same allowance once. Reading it
+again preserves consumed seats and optional additions; a Demo self-invitation
+therefore needs no manual purchase step.
+
+Hosts may also select `requireInstallation: true` with an explicit positive
+`maxDevicesPerLicense`. Invitations store that limit without inventing devices.
+One-use activation requires `{clientInstanceId,name}` and supplies a newly
+persisted registration ID to the profile callback. Registration and profile
+creation commit together; a failed callback consumes neither. These browser
+registrations are not GW DCR receipts or physical-device attestations.
+`requireActiveInstallation` rechecks the exact stored browser/role binding.
+Controller-authorized `revokeDevice` targets its actual registration ID;
+disabling an employee revokes that role's registrations without changing other
+roles. Hosts must use these current checks at their protected request boundary,
+rather than trusting an earlier session unlock.
+
+Vault capacity is an operational allocation; Network
 payments and admission remain with the configured host/GW provider.
 
 Demo BFFs can use these providers with memory or the configured durable vault.

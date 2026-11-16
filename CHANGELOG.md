@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve the existing trial offer as a once-only vault allocation, keeping
+  Demo self-invitation and activation independent of manual capacity additions.
+  Persist an explicit installation limit and browser registration atomically
+  with one-use activation when the host selects that policy. Exact registration
+  revocation and role suspension invalidate current installation checks.
+
 - Persist organization workforce capacity and operation-bound allocation retries.
   Read actual inventory, reserve seats atomically, and let hosts require managed
   capacity before invitations while retaining existing provider behavior.

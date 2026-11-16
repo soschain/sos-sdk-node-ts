@@ -4,9 +4,10 @@ import test from 'node:test'
 import {OrganizationWorkforceVaultProvider} from '../dist/organization-workforce-vault.js'
 import {TransactionalMemoryVaultRepository} from '../dist/transactional-vault.js'
 import {REPOSITORY_SAFE_EXAMPLES as safe} from 'sos-data-utils-ts/repository-privacy'
+import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
 const org=`Organization/${safe.demoOrganizationUuids.healthCare}`
 const make=(store,allowed=org)=>new OrganizationWorkforceVaultProvider({store,collection:'controller-capacity-test',assertManage:async value=>{if(value!==allowed)throw new Error('controller_forbidden')}})
-const invitation=profileId=>({organizationReference:org,sector:'health-care',profileId,role:'dentist',email:safe.individualEmail,roleCode:'ISCO-08|2261',employeeDid:`urn:uuid:${safe.resourceUuid}`,expiresAt:Date.now()+60000,organizationName:'Synthetic clinic',roleName:'Dentist'})
+const invitation=profileId=>({organizationReference:org,sector:'health-care',profileId,role:'dentist',email:safe.individualEmail,roleCode:HealthcareActorRoles.Dentist,employeeDid:`urn:uuid:${safe.resourceUuid}`,expiresAt:Date.now()+60000,organizationName:'Synthetic clinic',roleName:'Dentist'})
 test('capacity survives provider recreation and an exact retry adds no duplicate seats',async()=>{
  const store=new TransactionalMemoryVaultRepository(),p=make(store)
  const command={organizationReference:org,quantity:2,operationId:safe.resourceUuid}
@@ -77,4 +78,18 @@ test('managed host admission requires a persisted allocation before creating a s
 })
 test('managed-capacity constructor policy cannot be enabled by an ambiguous value',()=>{
  for(const value of ['true',1,{}])assert.throws(()=>new OrganizationWorkforceVaultProvider({store:new TransactionalMemoryVaultRepository(),collection:'managed-capacity-test',requireLicenseCapacity:value,assertManage:async()=>{}}),/capacity_policy_invalid/)
+})
+
+
+test('the existing trial allowance is persisted once and never resets consumed or added capacity',async()=>{
+ const store=new TransactionalMemoryVaultRepository(),p=make(store)
+ const initial=await p.ensureTrialLicenseCapacity(org)
+ assert.equal(initial.contracted,32)
+ await p.invite(invitation('trial-dentist'),async()=>{})
+ await p.addLicenseCapacity({organizationReference:org,quantity:1,operationId:safe.resourceUuid})
+ const resumed=await make(store).ensureTrialLicenseCapacity(org)
+ assert.equal(resumed.contracted,initial.contracted+1)
+ assert.equal(resumed.used,1)
+ assert.equal(resumed.free,initial.contracted)
+ await assert.rejects(make(store,'Organization/foreign').ensureTrialLicenseCapacity(org),/controller_forbidden/)
 })
