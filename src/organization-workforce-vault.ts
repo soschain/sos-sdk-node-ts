@@ -1,4 +1,5 @@
 import {createHash,randomBytes} from 'node:crypto'
+import type {ServerProfileSealer} from 'sos-sdk-core-ts/profile-sealer'
 import type {IVaultRepository} from 'sos-sdk-core-ts/vault-repository'
 import type {OrganizationEmployeeLifecycleRecord} from 'sos-data-utils-ts/employee-routing'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
@@ -7,6 +8,12 @@ export type OrganizationWorkforceSeat=Readonly<{
   id:string;organizationReference:string;sector:string;profileId:string;role:string;email:string
   status:'pending'|'active'|'inactive';expiresAt:number;credentialHash:string;delivery:'pending'|'sent'|'failed'
   employee:OrganizationEmployeeLifecycleRecord;groups?:readonly string[]
+}>
+type StoredSeat=OrganizationWorkforceSeat & Readonly<{protectedActivationCode?:string;invitationDeliveryPolicy?:'notification-only'}>
+export type OrganizationWorkforceInvitation=OrganizationWorkforceSeat & Readonly<{activationCode?:string;requiresReissue?:boolean}>
+export type OrganizationWorkforceVaultOptions=Readonly<{
+  store:TransactionalVaultRepository;collection:string;assertManage:(organizationReference:string)=>Promise<void>;now?:()=>number
+  invitationDeliveryPolicy?:'required'|'notification-only';sealer?:ServerProfileSealer
 }>
 export type OrganizationWorkforceDelivery=Readonly<{email:string;activationCode:string;organizationName:string;roleName:string}>
 export class OrganizationWorkforceError extends Error{
@@ -17,46 +24,93 @@ const email=(value:string)=>String(value||'').trim().toLowerCase()
 
 /** Vault-backed workforce provider. Hosts inject scope, controller policy and delivery; GW providers retain the same use cases. */
 export class OrganizationWorkforceVaultProvider{
-  constructor(private readonly options:Readonly<{store:TransactionalVaultRepository;collection:string;assertManage:(organizationReference:string)=>Promise<void>;now?:()=>number}>){
+  private readonly options:OrganizationWorkforceVaultOptions
+  constructor(options:OrganizationWorkforceVaultOptions){
     if(!options.collection)throw new TypeError('workforce_collection_required')
+    const policy=options.invitationDeliveryPolicy??'required'
+    if(policy!=='required'&&policy!=='notification-only')throw new TypeError('workforce_delivery_policy_invalid')
+    if(policy==='notification-only'&&(!options.sealer||typeof options.sealer.seal!=='function'||typeof options.sealer.unseal!=='function'))throw new TypeError('workforce_invitation_sealer_required')
+    const sealer=options.sealer
+    this.options=Object.freeze({...options,invitationDeliveryPolicy:policy,...(sealer?{sealer:Object.freeze({seal:sealer.seal.bind(sealer),unseal:sealer.unseal.bind(sealer)})}:{})})
+  }
+  private aad(seat:OrganizationWorkforceSeat){
+    return JSON.stringify(['sos-workforce-invitation-v1',this.options.collection,seat.id,seat.organizationReference,seat.email,seat.profileId,seat.sector,seat.role,seat.employee.roleCode,seat.employee.employeeDid,seat.expiresAt,seat.credentialHash])
+  }
+  private publicSeat(seat:StoredSeat):OrganizationWorkforceSeat{
+    const {protectedActivationCode: _protected,invitationDeliveryPolicy: _policy,...visible}=seat
+    return visible
   }
   private now(){return (this.options.now??Date.now)()}
   async invite(input:Readonly<{organizationReference:string;sector:string;profileId:string;role:string;email:string;roleCode:string;employeeDid:string;expiresAt:number;organizationName:string;roleName:string;groups?:readonly string[]}>,deliver:(message:OrganizationWorkforceDelivery)=>Promise<void>){
+    input=structuredClone(input)
     await this.options.assertManage(input.organizationReference)
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(email(input.email))||!input.roleCode||!input.profileId||!input.sector||!input.employeeDid||!Number.isFinite(input.expiresAt)||input.expiresAt<=this.now())throw new OrganizationWorkforceError('employee_invitation_invalid',400)
     if(input.groups&&(!Array.isArray(input.groups)||input.groups.length>32||input.groups.some(group=>typeof group!=='string'||!group||group.length>160)))throw new OrganizationWorkforceError('employee_group_invalid',400)
     const id=hash([this.options.collection,input.organizationReference,email(input.email),input.profileId].join('\0'))
     const activationCode=randomBytes(32).toString('base64url'),credentialHash=hash(activationCode)
+    const base:OrganizationWorkforceSeat={id,organizationReference:input.organizationReference,sector:input.sector,profileId:input.profileId,role:input.role,email:email(input.email),status:'pending',expiresAt:input.expiresAt,credentialHash,delivery:'pending',...(input.groups?{groups:[...new Set(input.groups)]}:{}),employee:{resourceId:id,email:email(input.email),roleCode:input.roleCode,employeeDid:input.employeeDid,status:'inactive'}}
+    const protectedActivationCode=this.options.invitationDeliveryPolicy==='notification-only'?await this.options.sealer!.seal(activationCode,this.aad(base)):undefined
+    await this.options.assertManage(input.organizationReference)
     const row=await this.options.store.runTransaction(async tx=>{
-      const current=await tx.get<OrganizationWorkforceSeat>(this.options.collection,id)
-      const seats=await tx.query<OrganizationWorkforceSeat>(this.options.collection,{where:[{attribute:'organizationReference',equals:input.organizationReference}]})
+      const current=await tx.get<StoredSeat>(this.options.collection,id)
+      const seats=await tx.query<StoredSeat>(this.options.collection,{where:[{attribute:'organizationReference',equals:input.organizationReference}]})
       if(current?.status==='active'&&current.expiresAt>this.now())throw new OrganizationWorkforceError('employee_already_active',409)
       if(!current&&seats.filter(seat=>seat.expiresAt>this.now()).length>=32)throw new OrganizationWorkforceError('employee_licence_capacity_exhausted',409)
-      const seat:OrganizationWorkforceSeat={id,organizationReference:input.organizationReference,sector:input.sector,profileId:input.profileId,role:input.role,email:email(input.email),status:'pending',expiresAt:input.expiresAt,credentialHash,delivery:'pending',...(input.groups?{groups:[...new Set(input.groups)]}:{}),employee:{resourceId:id,email:email(input.email),roleCode:input.roleCode,employeeDid:input.employeeDid,status:'inactive'}}
+      const seat:StoredSeat={...base,...(protectedActivationCode?{protectedActivationCode,invitationDeliveryPolicy:'notification-only' as const}:{})}
       await tx.put(this.options.collection,seat)
       return seat
     })
     try{await deliver({email:row.email,activationCode,organizationName:input.organizationName,roleName:input.roleName})}
-    catch{await this.markDelivery(id,credentialHash,'failed');throw new OrganizationWorkforceError('employee_delivery_failed',503)}
+    catch{
+      await this.markDelivery(id,credentialHash,'failed')
+      if(this.options.invitationDeliveryPolicy!=='notification-only')throw new OrganizationWorkforceError('employee_delivery_failed',503)
+      return {invited:true}
+    }
     await this.markDelivery(id,credentialHash,'sent')
     return {invited:true}
   }
   private async markDelivery(id:string,credentialHash:string,delivery:OrganizationWorkforceSeat['delivery']){
     await this.options.store.runTransaction(async tx=>{const row=await tx.get<OrganizationWorkforceSeat>(this.options.collection,id);if(row?.credentialHash===credentialHash)await tx.put(this.options.collection,{...row,delivery})})
   }
-  async list(organizationReference:string){
+  async list(organizationReference:string):Promise<OrganizationWorkforceInvitation[]>{
     await this.options.assertManage(organizationReference)
-    return (await this.options.store.query<OrganizationWorkforceSeat>(this.options.collection,{where:[{attribute:'organizationReference',equals:organizationReference}]})).filter(row=>row.expiresAt>this.now())
+    const seats=await this.options.store.query<StoredSeat>(this.options.collection,{where:[{attribute:'organizationReference',equals:organizationReference}]})
+    const result:OrganizationWorkforceInvitation[]=[]
+    const released:StoredSeat[]=[]
+    for(const row of seats){
+      if(row.organizationReference!==organizationReference||row.expiresAt<=this.now())continue
+      const visible=this.publicSeat(row)
+      if(this.options.invitationDeliveryPolicy!=='notification-only'||row.status!=='pending'){result.push(visible);continue}
+      if(row.invitationDeliveryPolicy!=='notification-only'||!row.protectedActivationCode){result.push({...visible,requiresReissue:true});continue}
+      const activationCode=await this.options.sealer!.unseal(row.protectedActivationCode,this.aad(row))
+      if(!/^[A-Za-z0-9_-]{43}$/u.test(activationCode)||hash(activationCode)!==row.credentialHash)throw new OrganizationWorkforceError('employee_invitation_invalid',403)
+      await this.options.assertManage(organizationReference)
+      await this.options.store.runTransaction(async tx=>{
+        const current=await tx.get<StoredSeat>(this.options.collection,row.id)
+        if(!current||current.status!=='pending'||current.expiresAt<=this.now()||this.aad(current)!==this.aad(row)||current.protectedActivationCode!==row.protectedActivationCode||current.invitationDeliveryPolicy!=='notification-only')throw new OrganizationWorkforceError('employee_invitation_changed',409)
+      })
+      released.push(row)
+      result.push({...visible,activationCode})
+    }
+    await this.options.assertManage(organizationReference)
+    await this.options.store.runTransaction(async tx=>{
+      for(const row of released){
+        const current=await tx.get<StoredSeat>(this.options.collection,row.id)
+        if(!current||current.status!=='pending'||current.expiresAt<=this.now()||this.aad(current)!==this.aad(row)||current.protectedActivationCode!==row.protectedActivationCode||current.invitationDeliveryPolicy!=='notification-only')throw new OrganizationWorkforceError('employee_invitation_changed',409)
+      }
+    })
+    return result
   }
   async activate<T>(verifiedEmail:string,activationCode:string,createProfile:(seat:OrganizationWorkforceSeat,transaction:IVaultRepository)=>Promise<T>):Promise<T>{
     if(!/^[A-Za-z0-9_-]{43}$/u.test(activationCode))throw new OrganizationWorkforceError('employee_invitation_invalid',403)
     const matches=await this.options.store.query<OrganizationWorkforceSeat>(this.options.collection,{where:[{attribute:'credentialHash',equals:hash(activationCode)}]})
     if(matches.length!==1)throw new OrganizationWorkforceError('employee_invitation_invalid',403)
     return this.options.store.runTransaction(async tx=>{
-      const seat=await tx.get<OrganizationWorkforceSeat>(this.options.collection,matches[0]!.id)
-      if(!seat||seat.email!==email(verifiedEmail)||seat.status!=='pending'||seat.delivery!=='sent'||seat.expiresAt<=this.now()||seat.credentialHash!==hash(activationCode))throw new OrganizationWorkforceError('employee_invitation_invalid',403)
-      const result=await createProfile(seat,tx)
-      await tx.put(this.options.collection,{...seat,status:'active',credentialHash:'',employee:{...seat.employee,status:'active'}})
+      const seat=await tx.get<StoredSeat>(this.options.collection,matches[0]!.id)
+      if(!seat||seat.email!==email(verifiedEmail)||seat.status!=='pending'||(seat.delivery!=='sent'&&!(this.options.invitationDeliveryPolicy==='notification-only'&&seat.invitationDeliveryPolicy==='notification-only'&&seat.protectedActivationCode))||seat.expiresAt<=this.now()||seat.credentialHash!==hash(activationCode))throw new OrganizationWorkforceError('employee_invitation_invalid',403)
+      const visible=this.publicSeat(seat)
+      const result=await createProfile(visible,tx)
+      await tx.put(this.options.collection,{...visible,status:'active',credentialHash:'',employee:{...seat.employee,status:'active'}})
       return result
     })
   }

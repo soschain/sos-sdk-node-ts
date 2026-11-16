@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Support an explicit host-only notification policy for workforce invitations:
+  seal pending activation codes for authorized controller retrieval while
+  preserving failed delivery, single-use activation and required-delivery defaults.
+  Legacy hash-only invitations require an explicit reissue.
+
 ## 0.5.1
 
 - Pin the verified Antifraud 0.3.2 and SOS Data 0.8.1 registry contracts while
