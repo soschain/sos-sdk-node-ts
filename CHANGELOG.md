@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Persist organization workforce capacity and operation-bound allocation retries.
+  Read actual inventory, reserve seats atomically, and let hosts require managed
+  capacity before invitations while retaining existing provider behavior.
+
 ## 0.5.2
 
 - Support an explicit host-only notification policy for workforce invitations:

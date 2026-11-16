@@ -1,7 +1,7 @@
 import {createHash,randomBytes} from 'node:crypto'
 import type {ServerProfileSealer} from 'sos-sdk-core-ts/profile-sealer'
 import type {IVaultRepository} from 'sos-sdk-core-ts/vault-repository'
-import type {OrganizationEmployeeLifecycleRecord} from 'sos-data-utils-ts/employee-routing'
+import type {LicenseListSummary,OrganizationEmployeeLifecycleRecord} from 'sos-data-utils-ts/employee-routing'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 
 export type OrganizationWorkforceSeat=Readonly<{
@@ -10,10 +10,13 @@ export type OrganizationWorkforceSeat=Readonly<{
   employee:OrganizationEmployeeLifecycleRecord;groups?:readonly string[]
 }>
 type StoredSeat=OrganizationWorkforceSeat & Readonly<{protectedActivationCode?:string;invitationDeliveryPolicy?:'notification-only'}>
+type StoredCapacity=Readonly<{id:string;organizationReference:string;contracted:number}>
+type StoredCapacityOperation=Readonly<{id:string;organizationReference:string;operationId:string;quantity:number}>
 export type OrganizationWorkforceInvitation=OrganizationWorkforceSeat & Readonly<{activationCode?:string;requiresReissue?:boolean}>
 export type OrganizationWorkforceVaultOptions=Readonly<{
   store:TransactionalVaultRepository;collection:string;assertManage:(organizationReference:string)=>Promise<void>;now?:()=>number
   invitationDeliveryPolicy?:'required'|'notification-only';sealer?:ServerProfileSealer
+  requireLicenseCapacity?:boolean
 }>
 export type OrganizationWorkforceDelivery=Readonly<{email:string;activationCode:string;organizationName:string;roleName:string}>
 export class OrganizationWorkforceError extends Error{
@@ -27,6 +30,7 @@ export class OrganizationWorkforceVaultProvider{
   private readonly options:OrganizationWorkforceVaultOptions
   constructor(options:OrganizationWorkforceVaultOptions){
     if(!options.collection)throw new TypeError('workforce_collection_required')
+    if(options.requireLicenseCapacity!==undefined&&typeof options.requireLicenseCapacity!=='boolean')throw new TypeError('employee_licence_capacity_policy_invalid')
     const policy=options.invitationDeliveryPolicy??'required'
     if(policy!=='required'&&policy!=='notification-only')throw new TypeError('workforce_delivery_policy_invalid')
     if(policy==='notification-only'&&(!options.sealer||typeof options.sealer.seal!=='function'||typeof options.sealer.unseal!=='function'))throw new TypeError('workforce_invitation_sealer_required')
@@ -41,6 +45,50 @@ export class OrganizationWorkforceVaultProvider{
     return visible
   }
   private now(){return (this.options.now??Date.now)()}
+  private capacityCollection(){return `${this.options.collection}__license-capacity`}
+  private capacityId(organizationReference:string){return hash([this.options.collection,organizationReference].join('\0'))}
+  private validateCapacity(capacity:StoredCapacity|undefined,organizationReference:string){
+    if(capacity&&(capacity.organizationReference!==organizationReference||!Number.isSafeInteger(capacity.contracted)||capacity.contracted<0))throw new OrganizationWorkforceError('employee_licence_capacity_invalid',409)
+  }
+  private inventory(capacity:StoredCapacity|undefined,seats:readonly OrganizationWorkforceSeat[]):LicenseListSummary{
+    const current=seats.filter(seat=>seat.expiresAt>this.now()),used=current.length,contracted=capacity?.contracted??used
+    if(contracted<used)throw new OrganizationWorkforceError('employee_licence_capacity_invalid',409)
+    return Object.freeze({contracted,free:contracted-used,used,available:contracted-used,issued:used,active:current.filter(seat=>seat.status==='active').length,inactive:current.filter(seat=>seat.status==='inactive').length})
+  }
+  async readLicenseInventory(organizationReference:string):Promise<LicenseListSummary>{
+    await this.options.assertManage(organizationReference)
+    return this.options.store.runTransaction(async tx=>{
+      const capacity=await tx.get<StoredCapacity>(this.capacityCollection(),this.capacityId(organizationReference))
+      const seats=await tx.query<OrganizationWorkforceSeat>(this.options.collection,{where:[{attribute:'organizationReference',equals:organizationReference}]})
+      this.validateCapacity(capacity,organizationReference)
+      return this.inventory(capacity,seats)
+    })
+  }
+  /** Allocate host-authorized vault capacity; payment and governed admission remain with the host/GW provider. */
+  async addLicenseCapacity(input:Readonly<{organizationReference:string;quantity:number;operationId:string}>):Promise<LicenseListSummary>{
+    const {organizationReference,quantity}=input
+    if(!Number.isSafeInteger(quantity)||quantity<=0)throw new OrganizationWorkforceError('employee_licence_quantity_invalid',400)
+    if(typeof input.operationId!=='string'||!input.operationId.trim()||input.operationId.length>160)throw new OrganizationWorkforceError('employee_licence_operation_invalid',400)
+    const operationId=input.operationId.trim(),id=this.capacityId(organizationReference),operationKey=hash([id,operationId].join('\0')),operations=`${this.capacityCollection()}__operations`
+    await this.options.assertManage(organizationReference)
+    return this.options.store.runTransaction(async tx=>{
+      const operation=await tx.get<StoredCapacityOperation>(operations,operationKey)
+      const capacity=await tx.get<StoredCapacity>(this.capacityCollection(),id)
+      const seats=await tx.query<OrganizationWorkforceSeat>(this.options.collection,{where:[{attribute:'organizationReference',equals:organizationReference}]})
+      this.validateCapacity(capacity,organizationReference)
+      const previous=this.inventory(capacity,seats)
+      if(operation){
+        if(!capacity||operation.organizationReference!==organizationReference||operation.operationId!==operationId||operation.quantity!==quantity)throw new OrganizationWorkforceError('employee_licence_operation_conflict',409)
+        return previous
+      }
+      const contracted=previous.contracted+quantity
+      if(!Number.isSafeInteger(contracted))throw new OrganizationWorkforceError('employee_licence_quantity_invalid',400)
+      const updated:StoredCapacity={id,organizationReference,contracted}
+      await tx.put(this.capacityCollection(),updated)
+      await tx.put(operations,{id:operationKey,organizationReference,operationId,quantity})
+      return this.inventory(updated,seats)
+    })
+  }
   async invite(input:Readonly<{organizationReference:string;sector:string;profileId:string;role:string;email:string;roleCode:string;employeeDid:string;expiresAt:number;organizationName:string;roleName:string;groups?:readonly string[]}>,deliver:(message:OrganizationWorkforceDelivery)=>Promise<void>){
     input=structuredClone(input)
     await this.options.assertManage(input.organizationReference)
@@ -54,8 +102,12 @@ export class OrganizationWorkforceVaultProvider{
     const row=await this.options.store.runTransaction(async tx=>{
       const current=await tx.get<StoredSeat>(this.options.collection,id)
       const seats=await tx.query<StoredSeat>(this.options.collection,{where:[{attribute:'organizationReference',equals:input.organizationReference}]})
+      const capacity=await tx.get<StoredCapacity>(this.capacityCollection(),this.capacityId(input.organizationReference))
+      this.validateCapacity(capacity,input.organizationReference)
       if(current?.status==='active'&&current.expiresAt>this.now())throw new OrganizationWorkforceError('employee_already_active',409)
-      if(!current&&seats.filter(seat=>seat.expiresAt>this.now()).length>=32)throw new OrganizationWorkforceError('employee_licence_capacity_exhausted',409)
+      const newReservation=(capacity||this.options.requireLicenseCapacity)?(!current||current.expiresAt<=this.now()):!current
+      const contracted=capacity?.contracted??(this.options.requireLicenseCapacity?0:32)
+      if(newReservation&&seats.filter(seat=>seat.expiresAt>this.now()).length>=contracted)throw new OrganizationWorkforceError('employee_licence_capacity_exhausted',409)
       const seat:StoredSeat={...base,...(protectedActivationCode?{protectedActivationCode,invitationDeliveryPolicy:'notification-only' as const}:{})}
       await tx.put(this.options.collection,seat)
       return seat

@@ -318,6 +318,19 @@ providers cannot reveal or activate a failed opt-in invitation. This policy
 changes notification availability only; recipient, code, expiry, capacity and
 single-use checks remain mandatory.
 
+`OrganizationWorkforceVaultProvider.addLicenseCapacity` persists an allocation
+authorized by the controller with a stable operation ID. An exact retry returns the
+current inventory without adding capacity twice; changing its quantity conflicts.
+`readLicenseInventory` returns the Data-owned summary from the allocation and
+current seat records. Pending invitations reserve capacity, and transactions
+prevent two competing invitations from spending the same free seat.
+
+Set `requireLicenseCapacity: true` at host construction to require a persisted
+allocation before creating new seats. This option stays under host control.
+Existing providers retain their historical admission policy until configured
+for managed capacity. Vault capacity is an operational allocation; Network
+payments and admission remain with the configured host/GW provider.
+
 Demo BFFs can use these providers with memory or the configured durable vault.
 The network composition retains its authorized SDK/GW provider for the same
 commands. This adds no separate Demo database or professional authority.
