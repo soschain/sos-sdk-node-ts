@@ -20,6 +20,20 @@ redeploy fixes; they do not hold Demo or establish Test Network/production
 readiness. Demo remains BFF-only; network cases retain their GW/Fabric gates.
 No-GDC architecture, authentication, privacy and custody remain mandatory.
 
+## Jurisdiction-scoped integration acceptance
+
+Jurisdiction-specific journeys are optional and nonblocking unless the change
+affects that exact flow. Unaffected Demo and general technology-sector
+lifecycles must not wait for Spain's certificate-signed PDF or another
+jurisdiction's documents, provider or private fixture. Preserve the selected
+lifecycle's own authentication, authority, privacy and custody checks.
+
+Affected regressions remain mandatory, including signing, upload and
+verification when a Spanish signed-PDF admission flow changes. Select scope
+before testing. A selected failure remains a failure; never turn it into a
+skip, synthetic success or green release claim. Report journeys separately
+from their viewport, theme, flavour and access-mode execution variants.
+
 
 ## Mandatory TDD
 

@@ -15,6 +15,20 @@ product SDK. Product-neutral storage, transport, credential, job and audio
 adapters belong here. Sector policy remains in downstream applications, and no
 shared package may depend back on a product SDK.
 
+## Release acceptance scope
+
+Follow the canonical [SOS Data layering and release contract](https://github.com/soschain/sos-data-utils-ts/blob/main/docs/SDK_LAYERING.md).
+Jurisdiction-specific integration journeys are optional and nonblocking unless
+the change affects that exact flow. Unaffected Demo and general technology-
+sector lifecycles do not wait for Spain's certificate-signed PDF or another
+jurisdiction's fixture. The selected lifecycle's own authority and custody
+requirements remain mandatory.
+
+When a jurisdiction flow changes, its affected regression is mandatory; a
+selected failure never becomes a skip, synthetic success or green release
+claim. Record the selected scope and distinguish user journeys from their
+execution variants. This rule changes no runtime, authentication or policy.
+
 For immutable prompt audio, `sos-data-utils-ts/prompt-audio` produces the
 canonical descriptor and localized numeric-code fragments. This package
 hashes that exact descriptor, stores the resulting bytes durably and invokes

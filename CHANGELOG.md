@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Clarify jurisdiction-scoped integration acceptance: unrelated Demo and
+  general technology-sector lifecycles remain independent, and affected
+  regressions remain mandatory without converting failures to skips or green.
+
 - Accept UN M49 host coverage, including World (`001`), when submitting
   organization verification, credential reissuance and Order requests. Preserve
   ISO-style host routes, tenant jurisdiction, encryption and response binding.
