@@ -1,11 +1,15 @@
 // Flow contract: one authorized IVault transaction persists an emergency ServiceRequest, its triage Task and optional literal Communication; restart/retry, denied authority, foreign subjects and injected partial writes cannot create duplicates or partial graphs, and existing Encounter transactions retain their own guard.
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import {execFileSync} from 'node:child_process'
+import {createRequire} from 'node:module'
+import {fileURLToPath} from 'node:url'
 import {PortalCareVaultProvider,executePortalCareOperation} from '../dist/portal-care-vault.js'
 import {TransactionalMemoryVaultRepository} from '../dist/transactional-vault.js'
 import {REPOSITORY_SAFE_EXAMPLES as safe} from 'sos-data-utils-ts/repository-privacy'
 import {CommunicationClaim as C,ServiceRequestClaim as S,EncounterClaim as E} from 'fhir-data-utils-ts/claims'
 import {TaskClaim as T} from 'sos-data-utils-ts/task-artifact-schema'
+const require=createRequire(import.meta.url)
 
 const text='  Synthetic message, caf\u00e9\n\u6c34\n  '
 function fixture(extra={}){
@@ -92,4 +96,83 @@ test('an existing authorized Encounter is retained unchanged and a missing link 
  assert.deepEqual(await f.provider.search('Encounter'),original)
  await assert.rejects(f.provider.requestEmergency({...f.input,intake:{...f.input.intake,idempotencyKey:'missing-link-one'},encounterReference:'Encounter/missing-one'}),/encounter_not_found/)
  assert.deepEqual(await f.provider.search('Encounter'),original)
+})
+
+function plannedEncounter(f,extra={}){
+ return {entryId:'planned-emergency-one',reference:'Encounter/planned-emergency-one',resourceType:'Encounter',claims:{[E.Subject]:f.context.subjectIdentifier,[E.Status]:'planned',[E.ServiceType]:f.input.intake.targetServiceReference,[E.ServiceProvider]:`Organization/${safe.resourceUuid}`,[E.Class]:'http://terminology.hl7.org/CodeSystem/v3-ActCode|AMB',...extra}}
+}
+
+test('creates a planned Encounter with the whole emergency graph in one read-before-write transaction',async()=>{
+ const f=fixture(),run=f.store.runTransaction.bind(f.store)
+ f.store.runTransaction=operation=>run(transaction=>{let wrote=false;return operation({...transaction,
+  get:async(...args)=>{assert.equal(wrote,false,'durable transaction read after write');return transaction.get(...args)},
+  query:async(...args)=>{assert.equal(wrote,false,'durable transaction query after write');return transaction.query(...args)},
+  put:async(...args)=>{wrote=true;return transaction.put(...args)},
+ })})
+ const planned=plannedEncounter(f),result=await f.provider.requestEmergency({...f.input,plannedEncounter:planned})
+ assert.equal(result.length,4)
+ assert.deepEqual(result.find(row=>row.entry.resourceType==='Encounter').entry,planned)
+ assert.equal(result.find(row=>row.entry.resourceType==='ServiceRequest').entry.claims[S.Encounter],planned.reference)
+ assert.equal(result.find(row=>row.entry.resourceType==='Task').entry.claims[T.Focus],'ServiceRequest/request-one')
+ assert.equal((await f.provider.notifications()).length,1)
+ const another={...f.input,intake:{...f.input.intake,idempotencyKey:'another-operation',serviceRequestEntryId:'another-request',triageTaskEntryId:'another-triage'},patientMessage:{...f.input.patientMessage,entryId:'another-message'}}
+ assert.equal((await f.provider.requestEmergency(another)).length,3)
+ assert.deepEqual(await f.provider.requestEmergency({...f.input,plannedEncounter:planned}),result)
+})
+
+test('same semantic operation keeps the first timestamps across concurrent and restarted server-clock retries',async()=>{
+ const f=fixture(),input={...f.input,plannedEncounter:plannedEncounter(f)}
+ const retry={...input,intake:{...input.intake,receivedAt:new Date(Date.parse(input.intake.receivedAt)+5000).toISOString()}}
+ const [first,second]=await Promise.all([f.provider.requestEmergency(input),f.provider.requestEmergency(retry)])
+ assert.deepEqual(second,first)
+ const restarted=new PortalCareVaultProvider({...f.context,now:()=>Date.parse(retry.intake.receivedAt)})
+ assert.deepEqual(await restarted.requestEmergency(retry),first)
+ assert.equal(first.find(row=>row.entry.resourceType==='ServiceRequest').entry.claims[S.AuthoredOn],input.intake.receivedAt)
+ assert.equal(first.find(row=>row.entry.resourceType==='Communication').entry.claims[C.Sent],input.intake.receivedAt)
+ assert.equal((await f.provider.notifications()).length,1)
+})
+
+test('a failed planned Encounter write rolls back every resource, notice and operation receipt',async()=>{
+ const f=fixture(),run=f.store.runTransaction.bind(f.store);let failed=false
+ f.store.runTransaction=operation=>run(transaction=>operation({...transaction,put:async(collection,record)=>{
+  const result=await transaction.put(collection,record)
+  if(!failed&&record.entry?.resourceType==='Encounter'){failed=true;throw new Error('planned_encounter_write_failed')}
+  return result
+ }}))
+ const input={...f.input,plannedEncounter:plannedEncounter(f)}
+ await assert.rejects(f.provider.requestEmergency(input),/planned_encounter_write_failed/)
+ for(const collection of [f.provider.collectionNames.resources,f.provider.collectionNames.communications,`${f.provider.collectionNames.resources}_operations`])assert.deepEqual(await f.store.query(collection,{}),[])
+ assert.equal((await f.provider.requestEmergency(input)).length,4)
+})
+
+test('planned Encounter identity, subject, lifecycle and service cannot diverge from the request',async()=>{
+ for(const mutate of [
+  (f,input)=>({...input,plannedEncounter:plannedEncounter(f,{[E.Status]:'in-progress'})}),
+  (f,input)=>({...input,plannedEncounter:plannedEncounter(f,{[E.Subject]:'urn:uuid:00000000-0000-4000-8000-000000000099'})}),
+  (f,input)=>({...input,plannedEncounter:plannedEncounter(f,{[E.ServiceType]:'HealthcareService/foreign-one'})}),
+  (f,input)=>({...input,plannedEncounter:plannedEncounter(f),encounterReference:'Encounter/different-one'}),
+ ]){
+  const f=fixture();await assert.rejects(f.provider.requestEmergency(mutate(f,f.input)),/encounter|subject_mismatch/)
+  assert.deepEqual(await f.store.query(f.provider.collectionNames.resources,{}),[])
+ }
+})
+
+test('planned Encounter permission is checked before commit and retry still binds current actor and message',async()=>{
+ const denied=fixture({assertResourceAccess:async(_transaction,action,entry)=>{if(action==='write'&&entry.resourceType==='Encounter')throw new Error('planned_encounter_forbidden')}})
+ await assert.rejects(denied.provider.requestEmergency({...denied.input,plannedEncounter:plannedEncounter(denied)}),/planned_encounter_forbidden/)
+ assert.deepEqual(await denied.store.query(denied.provider.collectionNames.resources,{}),[])
+ const providerBound=fixture({assertResourceAccess:async(_transaction,_action,entry)=>{if(entry.resourceType==='Encounter'&&entry.claims[E.ServiceProvider]!==`Organization/${safe.resourceUuid}`)throw new Error('planned_provider_forbidden')}})
+ await assert.rejects(providerBound.provider.requestEmergency({...providerBound.input,plannedEncounter:plannedEncounter(providerBound,{[E.ServiceProvider]:'Organization/foreign-one'})}),/planned_provider_forbidden/)
+ assert.deepEqual(await providerBound.store.query(providerBound.provider.collectionNames.resources,{}),[])
+ const f=fixture(),input={...f.input,plannedEncounter:plannedEncounter(f)};await f.provider.requestEmergency(input)
+ const foreign=new PortalCareVaultProvider({...f.context,actorIdentifier:'did:web:example.invalid:other-actor'})
+ await assert.rejects(foreign.requestEmergency(input),/idempotency_conflict/)
+ await assert.rejects(f.provider.requestEmergency({...input,patientMessage:{...input.patientMessage,text:'Changed'}}),/idempotency_conflict/)
+ await assert.rejects(f.provider.requestEmergency({...input,plannedEncounter:plannedEncounter(f,{[E.PeriodStart]:'2030-01-01T11:00:00.000Z'})}),/idempotency_conflict/)
+ await assert.rejects(f.provider.requestEmergency({...input,assistanceCode:{...input.assistanceCode,code:'different-care'}}),/idempotency_conflict/)
+ assert.equal((await f.provider.search('Communication'))[0].entry.claims[C.ContentString],text)
+})
+
+test('public emergency consumer types retain the Core contract and precise optional planned Encounter',()=>{
+ execFileSync(process.execPath,[require.resolve('typescript/bin/tsc'),'--noEmit','--strict','--skipLibCheck','--target','ES2023','--module','NodeNext','--moduleResolution','NodeNext',fileURLToPath(new URL('./fixtures/portal-emergency-public-consumer.ts',import.meta.url))],{stdio:'pipe'})
 })

@@ -266,11 +266,17 @@ once per atomic operation, even when both Task and Encounter notices are saved. 
 replaced by reusing their references. Direct generic history writes are denied.
 
 `PortalCareVaultProvider.requestEmergency` and the `emergency` peer operation
-consume the shared Core emergency input. One vault transaction stores the
-ServiceRequest, its triage Task and optional patient Communication, with a retry
-receipt bound to the actor and intake idempotency key. Literal body text remains
-separate from Narrative and notes. Existing Encounter references must resolve to
-authorized records; creating a request neither invents nor changes an Encounter.
+accept `PortalEmergencyRequestInput`: the shared Core emergency input plus an
+optional trusted `plannedEncounter`. One vault transaction stores the
+ServiceRequest, its triage Task, optional patient Communication and optional
+planned Encounter, with a retry receipt bound to the actor and intake
+idempotency key. The planned Encounter must match the subject and target
+service; an explicit Encounter link must agree with its reference. Existing
+Encounter references still resolve to authorized records without being changed.
+Literal body text remains separate from Narrative and notes. Later retries with
+the same intent retain the first stored timestamps and return that operation's
+stored graph. Caller-owned Encounter periods, coding, message and routing remain
+bound, and every retry checks current authority before returning records.
 ServiceRequest and patient Communication writes use this transaction rather than
 generic resource saves. The BFF retains responsibility for current subject,
 service, recipient and role authority through the existing access callbacks.

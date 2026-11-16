@@ -30,6 +30,8 @@ export type PortalCareNotification=Readonly<{
   communication:ReturnType<typeof createCommMsgExtendedDraft>['message']
 }>
 export type PortalCareSaveOptions=Readonly<{expectedRevision?:number;remindAt?:string|null}>
+/** Trusted host intent; the optional planned Encounter is committed with the emergency graph. */
+export type PortalEmergencyRequestInput=EmergencyRequestInput&Readonly<{plannedEncounter?:FlatClaimResourceEntry}>
 /** The host resolves the current responder and optional escalation destination from its verified context. */
 export type PortalEmergencyTriageMutation=Readonly<{
   operationId:string;taskReference:string;expectedRevision:number;action:EmergencyTriageAction;responderReference:string
@@ -39,7 +41,7 @@ export type PortalCareOperation=
   | Readonly<{kind:'search';resourceType:PortalCareResourceType}>
   | Readonly<{kind:'save';entry:FlatClaimResourceEntry;mode:'create'|'update';options?:PortalCareSaveOptions}>
   | Readonly<{kind:'encounter';mutation:PortalEncounterMutation}>
-  | Readonly<{kind:'emergency';request:EmergencyRequestInput}>
+  | Readonly<{kind:'emergency';request:PortalEmergencyRequestInput}>
   | Readonly<{kind:'emergency-triage';mutation:PortalEmergencyTriageMutation}>
   | Readonly<{kind:'notifications'}>
   | Readonly<{kind:'acknowledge';id:string}>
@@ -139,22 +141,44 @@ export class PortalCareVaultProvider {
     })
   }
 
-  /** One purpose-fixed transaction owns the request, triage, optional message and retry receipt. */
-  async requestEmergency(input:EmergencyRequestInput):Promise<readonly PortalCareStoredResource[]>{
-    const plan=orchestrateEmergencyRequest(input)
-    const entries=[plan.serviceRequestEntry,plan.triageTaskEntry,...(plan.communicationEntry?[plan.communicationEntry]:[])].map(entry=>this.normalize(entry))
-    const fingerprint=hash(JSON.stringify({actor:this.options.actorIdentifier,plan}))
+  /** One transaction owns the request, triage, optional message/planned Encounter and retry receipt. */
+  async requestEmergency(input:PortalEmergencyRequestInput):Promise<readonly PortalCareStoredResource[]>{
+    const planned=input.plannedEncounter===undefined?undefined:this.normalizePlannedEncounter(input.plannedEncounter,input.plannedEncounter.reference)
+    if(planned&&(planned.claims[EncounterClaim.ServiceType]!==input.intake.targetServiceReference
+      ||input.encounterReference!==undefined&&input.encounterReference!==planned.reference))throw new TypeError('care_emergency_encounter_mismatch')
+    const plan=orchestrateEmergencyRequest({...input,...(planned?{encounterReference:planned.reference}:{})})
+    const entries=[plan.serviceRequestEntry,plan.triageTaskEntry,...(plan.communicationEntry?[plan.communicationEntry]:[]),...(planned?[planned]:[])].map(entry=>this.normalize(entry))
+    // These four coordinates are generated from the host's retry clock. All clinical
+    // intent, including caller-owned Encounter periods, remains in the fingerprint.
+    const semanticPlan={...plan,intake:{...plan.intake,receivedAt:undefined},
+      serviceRequestEntry:withoutClockClaim(plan.serviceRequestEntry,ServiceRequestClaim.AuthoredOn),
+      triageTaskEntry:withoutClockClaim(plan.triageTaskEntry,TaskClaim.AuthoredOn),
+      ...(plan.communicationEntry?{communicationEntry:withoutClockClaim(plan.communicationEntry,CommunicationClaim.Sent)}:{})}
+    const fingerprint=hash(JSON.stringify({actor:this.options.actorIdentifier,plan:semanticPlan,plannedEncounter:planned}))
     const receipts=`${this.collectionNames.resources}_operations`
     const id=hash([this.options.scopeKey,this.options.generationId,this.options.subjectIdentifier,'emergency',plan.intake.idempotencyKey].join('\0'))
-    await this.options.store.runTransaction(async transaction=>{
+    return this.options.store.runTransaction(async transaction=>{
       for(const entry of entries){
         await this.authorize(transaction,'write',resourceTypeOf(entry.reference))
         await this.options.assertResourceAccess?.(transaction,'write',entry)
+        await this.authorize(transaction,'read',resourceTypeOf(entry.reference))
+        await this.options.assertResourceAccess?.(transaction,'read',entry)
       }
       const receipt=await transaction.get<{id:string;fingerprint:string}>(receipts,id)
-      if(receipt){if(receipt.fingerprint!==fingerprint)throw new Error('care_emergency_idempotency_conflict');return}
+      if(receipt){
+        if(receipt.fingerprint!==fingerprint)throw new Error('care_emergency_idempotency_conflict')
+        const records:PortalCareStoredResource[]=[]
+        for(const entry of entries){
+          const record=await transaction.get<PortalCareStoredResource>(this.collectionNames.resources,this.resourceId(entry))
+          if(!record||!this.owns(record)||record.entry.reference!==entry.reference)throw new Error('care_emergency_receipt_incomplete')
+          this.normalize(record.entry)
+          await this.options.assertResourceAccess?.(transaction,'read',record.entry)
+          records.push(record)
+        }
+        return records
+      }
       const encounterReference=plan.serviceRequestEntry.claims[ServiceRequestClaim.Encounter]
-      if(encounterReference){
+      if(encounterReference&&!planned){
         await this.authorize(transaction,'read','Encounter')
         const encounter=(await this.resources(transaction)).find(row=>row.entry.reference===encounterReference&&row.entry.resourceType==='Encounter')
         if(!encounter)throw new Error('care_emergency_encounter_not_found')
@@ -167,8 +191,8 @@ export class PortalCareVaultProvider {
       await transaction.put(this.collectionNames.communications,notice)
       await transaction.put(receipts,{id,fingerprint,scopeKey:this.options.scopeKey,generationId:this.options.generationId,
         subjectIdentifier:this.options.subjectIdentifier,expiresAt:this.options.expiresAt})
+      return records
     })
-    return [...await this.search('ServiceRequest'),...await this.search('Task'),...(plan.communicationEntry?await this.search('Communication'):[])]
   }
 
   /** Core triage and an existing linked Encounter share one atomic operation and retry receipt. */
@@ -251,10 +275,8 @@ export class PortalCareVaultProvider {
       let entries:readonly FlatClaimResourceEntry[]
       const at=new Date(this.now()).toISOString()
       if(mutation.create){
-        const created=this.normalize(mutation.create)
-        if(created.resourceType!=='Encounter'||created.reference!==mutation.encounterReference
-          ||created.claims[EncounterClaim.Status]!==EncounterStatusR5.Planned
-          ||mutation.expectedRevision!==undefined||mutation.destination||mutation.status||mutation.sourceOutcome)throw new TypeError('encounter_mutation_invalid')
+        const created=this.normalizePlannedEncounter(mutation.create,mutation.encounterReference)
+        if(mutation.expectedRevision!==undefined||mutation.destination||mutation.status||mutation.sourceOutcome)throw new TypeError('encounter_mutation_invalid')
         if(previous||await transaction.get(this.collectionNames.resources,this.resourceId(created)))throw new Error('care_resource_conflict')
         entries=[created]
       }else{
@@ -392,6 +414,11 @@ export class PortalCareVaultProvider {
     return visible
   }
   private resourceId(entry:FlatClaimResourceEntry){return hash([this.options.scopeKey,this.options.generationId,this.options.subjectIdentifier,entry.reference].join('\0'))}
+  private normalizePlannedEncounter(raw:FlatClaimResourceEntry,reference:string):FlatClaimResourceEntry{
+    const entry=this.normalize(raw)
+    if(entry.resourceType!=='Encounter'||entry.reference!==reference||entry.claims[EncounterClaim.Status]!==EncounterStatusR5.Planned)throw new TypeError('encounter_mutation_invalid')
+    return entry
+  }
   private record(entry:FlatClaimResourceEntry,revision:number,remindAt:string|null):PortalCareStoredResource{
     const {scopeKey,subjectIdentifier,generationId,expiresAt}=this.options
     return {id:this.resourceId(entry),scopeKey,subjectIdentifier,generationId,expiresAt,entry,revision,remindAt}
@@ -492,6 +519,9 @@ class BufferedVaultTaskRepository implements TaskRepository {
   async flush(){for(const id of this.pending){const row=this.rows.get(id);if(row)await this.vault.put(this.collection,row);else await this.vault.delete(this.collection,id)}}
 }
 function hash(value:string){return createHash('sha256').update(value).digest('hex')}
+function withoutClockClaim(entry:FlatClaimResourceEntry,key:string):FlatClaimResourceEntry{
+  return {...entry,claims:Object.fromEntries(Object.entries(entry.claims).filter(([name])=>name!==key))}
+}
 function referenceIdentity(value:string){return value.trim().replace(/^(?:Patient|Organization)\//u,'')}
 function resourceTypeOf(reference:string){const type=reference.split('/')[0];assertResourceType(type);return type}
 function isEmergencyTriage(entry:FlatClaimResourceEntry){return entry.resourceType==='Task'&&entry.claims[TaskClaim.Code]==='triage'&&entry.claims[TaskClaim.Focus]?.startsWith('ServiceRequest/')}
