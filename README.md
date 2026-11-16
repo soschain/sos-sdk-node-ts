@@ -35,12 +35,18 @@ Staff provisioning and recipient installation contracts are documented in
 [`docs/WORKFORCE_CLIENT.md`](docs/WORKFORCE_CLIENT.md).
 The shared pre-DCR transport below controller/employee admission is described in
 [`docs/DEVICE_ENROLLMENT.md`](docs/DEVICE_ENROLLMENT.md).
+Validated registered inventory, licence commerce and lifecycle transport are
+described in [`docs/WORKFORCE_ADMINISTRATION.md`](docs/WORKFORCE_ADMINISTRATION.md).
 Organization bootstrap response authentication and configured signing-key custody
 are documented in
 [`docs/ORGANIZATION_RESPONSE_AUTHENTICATION.md`](docs/ORGANIZATION_RESPONSE_AUTHENTICATION.md).
 The existing purpose-separated profile keys and PIN/host protection are described
 in [`docs/SERVER_PROFILE_CUSTODY_KEYS.md`](docs/SERVER_PROFILE_CUSTODY_KEYS.md)
 and [`docs/SERVER_PROFILE_PROTECTION.md`](docs/SERVER_PROFILE_PROTECTION.md).
+Controller recovery coordination and its atomic host boundary are described in
+[`docs/PROFILE_RECOVERY.md`](docs/PROFILE_RECOVERY.md).
+For controller-owned pending document custody and protected downloads, see
+[`docs/CONTROLLER_IDENTITY_EVIDENCE.md`](docs/CONTROLLER_IDENTITY_EVIDENCE.md).
 For transactional custody sessions and authorized PIN rewrap, see
 [`docs/REGISTERED_PROFILE_SESSIONS.md`](docs/REGISTERED_PROFILE_SESSIONS.md).
 For registered individual-controller discovery and SMART subject selection, see

@@ -177,22 +177,30 @@ export class RegisteredProfileSessions{
    await port.delete(this.options.collections.sessions,sessionId)
   })
  }
- /** Caller must first authorize recovery/passkey custody; possession alone is not authorization. */
- async replacePin(input:RegisteredProfileBinding&Readonly<{authorizedWalletSeed:string;authorizedVpToken?:string;newPin:string}>){
-  const before=await this.profile(input)
-  await this.validatePinCustody(before,input.authorizedWalletSeed)
-  if(before.protectedVpToken&&!input.authorizedVpToken)throw new Error('registered_profile_authorized_vp_required')
-  const protectedWalletSeed=await protectServerProfileSecret(input.authorizedWalletSeed,input.newPin,`${before.profileId}:wallet-seed`,this.options.sealer,this.options.protection)
-  const protectedVpToken=before.protectedVpToken?await protectServerProfileSecret(input.authorizedVpToken!,input.newPin,`${before.profileId}:vp-token`,this.options.sealer,this.options.protection):undefined
-  return this.options.vault.runTransaction(async port=>{
-   const current=await this.profile(input,port);unchanged(before,current)
-   const groups=await Promise.all(this.sessionCollections.map(async collection=>({collection,rows:await port.query<{id:string;ownerId:string;profileId:string}>(collection,{where:[{attribute:'ownerId',equals:input.ownerId},{attribute:'profileId',equals:input.profileId}]})})))
-   for(const group of groups)for(const row of group.rows)if(row.ownerId!==input.ownerId||row.profileId!==input.profileId||typeof row.id!=='string'||!row.id)throw denied()
+ /** Host must authorize recovery/passkey custody first. Preparation grants no transport or signing capability. */
+ async preparePinReplacement(input:RegisteredProfileBinding&Readonly<{authorizedWalletSeed:string;authorizedVpToken?:string;newPin:string}>){
+  const captured=Object.freeze({...input,routeContext:Object.freeze({...input.routeContext})})
+  const binding=Object.freeze({ownerId:captured.ownerId,profileId:captured.profileId,actorDid:captured.actorDid,providerDid:captured.providerDid,routeContext:captured.routeContext})
+  const before=await this.profile(binding)
+  await this.validatePinCustody(before,captured.authorizedWalletSeed)
+  if(before.protectedVpToken&&!captured.authorizedVpToken)throw new Error('registered_profile_authorized_vp_required')
+  const protectedWalletSeed=await protectServerProfileSecret(captured.authorizedWalletSeed,captured.newPin,`${before.profileId}:wallet-seed`,this.options.sealer,this.options.protection)
+  const protectedVpToken=before.protectedVpToken?await protectServerProfileSecret(captured.authorizedVpToken!,captured.newPin,`${before.profileId}:vp-token`,this.options.sealer,this.options.protection):undefined
+  const commit=async(port:IVaultRepository)=>{
+   const current=await this.profile(binding,port);unchanged(before,current)
+   const groups=await Promise.all(this.sessionCollections.map(async collection=>({collection,rows:await port.query<{id:string;ownerId:string;profileId:string}>(collection,{where:[{attribute:'ownerId',equals:binding.ownerId},{attribute:'profileId',equals:binding.profileId}]})})))
+   for(const group of groups)for(const row of group.rows)if(row.ownerId!==binding.ownerId||row.profileId!==binding.profileId||typeof row.id!=='string'||!row.id)throw denied()
    const {lockedUntil:_locked,...rest}=current
    const updated={...rest,protectedWalletSeed,...(protectedVpToken?{protectedVpToken}:{}),failedUnlocks:0,credentialRevision:revision(current)+1,updatedAt:this.now().toISOString()}
    await port.put(this.options.collections.profiles,updated)
    for(const group of groups)for(const row of group.rows)await port.delete(group.collection,row.id)
    return updated
-  })
+  }
+  return Object.freeze({commit})
+ }
+ /** Existing standalone path delegates to the same prepared transaction operation. */
+ async replacePin(input:RegisteredProfileBinding&Readonly<{authorizedWalletSeed:string;authorizedVpToken?:string;newPin:string}>){
+  const prepared=await this.preparePinReplacement(input)
+  return this.options.vault.runTransaction(prepared.commit)
  }
 }

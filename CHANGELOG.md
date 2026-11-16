@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- Pin the verified Antifraud 0.3.2 and SOS Data 0.8.1 registry contracts while
+  retaining Core 0.7.0 and all other direct runtime dependency versions.
+
+- Read the current signed authorized-subject directory without mutating profile
+  metadata or a selected SMART context; recheck the exact current actor session
+  before transport and before returning accepted subjects.
+
+- Add sealed controller-owned pending evidence with current transactional
+  custody resolution, independent document slots, opaque protected downloads,
+  immutable retries and exact-card reset/expiry cleanup. Reuse the same vault
+  usecase across host-selected Demo and Network adapters.
+
+- Submit purpose-fixed workflow Group/Consent entries through the existing
+  registered workforce transport. Preserve provider/caller/thread binding and
+  actual acknowledgements without exposing a generic gateway batch method.
+
+- Allow initial recovery-code redelivery only for the same generation-one
+  identity and seed after host current-profile PIN/revision checks; preserve
+  the original code without another write or rotation.
+
+- Coordinate controller recovery through owned share/ciphertext and atomic
+  generation ports. Preserve historical email record/AAD/code bytes, bind
+  phones separately, and return recovery codes without returning wallet seeds.
+  Reuse managed PIN preparation so a host can atomically join recovery/outbox
+  writes to exact-profile revocation in both configured session families.
+  Share configured Google KMS HTTP custody with a binary 32-byte recovery port
+  while retaining the existing UTF-8 profile-sealer behavior.
+
+- Add registered workforce inventory and lifecycle transport with validated
+  phone/email DTOs, exact seat/device selectors, explicit Offer/Order evidence,
+  and separately configured host-registry status/purge readback.
+
+- Support client-bound controller presentations with the existing profile actor
+  key and embedded own public JWK, preserving the distinct runtime VP purpose.
+
 - Share explicit encrypted pre-DCR Token/Device transport below domain admission
   for controller and employee enrollment. Preserve employee grant checks, exact
   key purposes, optional registration token and trusted reply bindings; snapshot

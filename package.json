@@ -28,6 +28,14 @@
       "types": "./dist/server-profile-custody-keys.d.ts",
       "default": "./dist/server-profile-custody-keys.js"
     },
+    "./controller-identity-evidence-vault": {
+      "types": "./dist/controller-identity-evidence-vault.d.ts",
+      "default": "./dist/controller-identity-evidence-vault.js"
+    },
+    "./profile-recovery-service": {
+      "types": "./dist/profile-recovery-service.d.ts",
+      "default": "./dist/profile-recovery-service.js"
+    },
     "./server-profile-protection": {
       "types": "./dist/server-profile-protection.d.ts",
       "default": "./dist/server-profile-protection.js"
@@ -150,11 +158,11 @@
   },
   "dependencies": {
     "@simplewebauthn/server": "13.3.2",
-    "antifraud-data-utils-ts": "0.3.0",
+    "antifraud-data-utils-ts": "0.3.2",
     "express": "4.22.3",
     "fhir-data-utils-ts": "0.7.0",
     "livekit-server-sdk": "2.19.2",
-    "sos-data-utils-ts": "0.8.0",
+    "sos-data-utils-ts": "0.8.1",
     "sos-sdk-core-ts": "0.7.0",
     "tasks-core-node-ts": "0.1.3",
     "web-push": "4.0.0"
