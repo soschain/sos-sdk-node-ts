@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.4
 
 - Add `PortalCareVaultProvider.requestEmergency`, a purpose-fixed emergency
   request vault transaction using the shared Core
