@@ -84,3 +84,19 @@ test('revocation targets the exact stored registration and disabling a role inva
  assert.equal(seats.find(row=>row.id===second.id).employee.license.activeDevices,0)
  assert.equal(seats.find(row=>row.id===second.id).employee.license.devices[0].status,'revoked')
 })
+
+
+test('role reactivation requires a fresh session generation and never restores an explicitly revoked browser',async()=>{
+ const store=new TransactionalMemoryVaultRepository(),p=provider(store)
+ await p.addLicenseCapacity({organizationReference:org,quantity:1,operationId:safe.resourceUuid})
+ let code='',original;await p.invite(input,async message=>{code=message.activationCode})
+ await p.activate(input.email,code,async(_seat,_tx,registration)=>{original=registration;return true},{clientInstanceId:safe.resourceUuid,name:'Synthetic browser'})
+ const [seat]=await p.list(org)
+ await p.change(org,seat.id,'disable');await p.change(org,seat.id,'reactivate')
+ const resumed=await p.requireActiveInstallation(input.email,input.sector,input.profileId,safe.resourceUuid)
+ assert.equal(resumed.registrationId,original.registrationId)
+ assert.ok(resumed.generation>original.generation)
+ await p.revokeDevice(org,seat.id,seat.employee.license.id,resumed.registrationId)
+ await p.change(org,seat.id,'disable');await p.change(org,seat.id,'reactivate')
+ await assert.rejects(p.requireActiveInstallation(input.email,input.sector,input.profileId,safe.resourceUuid),/installation_required/)
+})

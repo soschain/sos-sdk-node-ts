@@ -7,6 +7,8 @@
   Persist an explicit installation limit and browser registration atomically
   with one-use activation when the host selects that policy. Exact registration
   revocation and role suspension invalidate current installation checks.
+  Reactivation requires a fresh PIN-opened session generation and does not
+  restore an explicitly revoked browser.
 
 - Persist organization workforce capacity and operation-bound allocation retries.
   Read actual inventory, reserve seats atomically, and let hosts require managed
