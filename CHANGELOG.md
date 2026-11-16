@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Accept UN M49 host coverage, including World (`001`), when submitting
+  organization verification, credential reissuance and Order requests. Preserve
+  ISO-style host routes, tenant jurisdiction, encryption and response binding.
+  Two genuine failures now pass with malformed-route and retained auth controls;
+  16 focused transport/authentication cases, all 329 native cases and strict
+  compilation pass, with zero skips or retries.
+
 ## 0.5.2
 
 - Support an explicit host-only notification policy for workforce invitations:
