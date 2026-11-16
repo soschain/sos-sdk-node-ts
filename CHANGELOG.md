@@ -2,6 +2,15 @@
 
 ## 0.5.4
 
+- Accept an optional trusted `plannedEncounter` in
+  `PortalEmergencyRequestInput`. Commit it with ServiceRequest, triage Task,
+  optional Communication, notice and operation receipt in one read-before-write
+  vault transaction. Return only that operation's stored graph. Same-intent
+  server-clock retries preserve the first stored timestamps; caller Encounter
+  periods, coding, message, service and actor remain bound. Existing planned
+  Encounter validation, resource authorization and ordinary Encounter lifecycle
+  behavior remain in force.
+
 - Add `PortalCareVaultProvider.requestEmergency`, a purpose-fixed emergency
   request vault transaction using the shared Core
   ServiceRequest/triage plan and optional literal patient Communication. Keep
@@ -17,7 +26,8 @@
 - Pin verified public FHIR 0.7.1 and SOS Core 0.7.1. Preserve all other direct
   versions and lock entries apart from the required nested historical FHIR
   0.7.0 copies. Fresh registry installation, strict compilation and all 352
-  native cases pass with one worker and zero skips.
+  native cases pass with one worker and zero skips. The cumulative planned
+  Encounter correction passes all 358 cases, including public typed consumers.
 
 ## 0.5.3
 
