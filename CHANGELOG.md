@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.5.3
+
+- Pin verified Antifraud 0.3.3 and SOS Data 0.8.2 registry contracts while
+  preserving every other dependency, public export and compiled output.
+  Fresh registry installation, strict compilation and all 342 native cases
+  pass with one memory-bounded worker and zero skips. All 32 public loaders,
+  exact upstream package bytes and the production dependency closure pass.
 
 - Preserve the existing trial offer as a once-only vault allocation, keeping
   Demo self-invitation and activation independent of manual capacity additions.

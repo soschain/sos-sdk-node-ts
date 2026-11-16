@@ -1,6 +1,6 @@
 {
   "name": "sos-sdk-node-ts",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Product-neutral Node adapters shared by SOSChain, Vet and UHC runtimes",
   "license": "Apache-2.0",
   "author": "Connecting Solution & Applications Ltd",
@@ -158,11 +158,11 @@
   },
   "dependencies": {
     "@simplewebauthn/server": "13.3.2",
-    "antifraud-data-utils-ts": "0.3.2",
+    "antifraud-data-utils-ts": "0.3.3",
     "express": "4.22.3",
     "fhir-data-utils-ts": "0.7.0",
     "livekit-server-sdk": "2.19.2",
-    "sos-data-utils-ts": "0.8.1",
+    "sos-data-utils-ts": "0.8.2",
     "sos-sdk-core-ts": "0.7.0",
     "tasks-core-node-ts": "0.1.3",
     "web-push": "4.0.0"
