@@ -6,7 +6,8 @@
   organization verification, credential reissuance and Order requests. Preserve
   ISO-style host routes, tenant jurisdiction, encryption and response binding.
   Two genuine failures now pass with malformed-route and retained auth controls;
-  16 focused transport/authentication cases and strict compilation pass.
+  16 focused transport/authentication cases, all 329 native cases and strict
+  compilation pass, with zero skips or retries.
 
 ## 0.5.2
 
