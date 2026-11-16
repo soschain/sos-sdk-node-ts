@@ -8,6 +8,8 @@
   completed enrollment evidence after invitation expiry and reject stale
   sessions or changes during key opening. Bind organizations to the configured
   enrollment host without requiring a subject-directory catalog entry.
+  Require a nonempty persisted tenant issuer on both completed-enrollment
+  records before comparing their exact values.
 
 - Sign one admitted stored-profile payload through fixed individual VP or
   organization detached ES384 profiles. Preserve existing seed derivation,
