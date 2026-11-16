@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Sign one admitted stored-profile payload through fixed individual VP or
+  organization detached ES384 profiles. Preserve existing seed derivation,
+  session AAD, public keys and revision-zero rows; recheck current profile and
+  session state after unsealing before returning a public-only signature result.
+
 ## 0.5.4
 
 - Accept an optional trusted `plannedEncounter` in

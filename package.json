@@ -12,6 +12,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./stored-profile-signing": {
+      "types": "./dist/stored-profile-signing.d.ts",
+      "default": "./dist/stored-profile-signing.js"
+    },
     "./controller-governance-signer": {
       "types": "./dist/controller-governance-signer.d.ts",
       "default": "./dist/controller-governance-signer.js"

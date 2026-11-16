@@ -49,6 +49,8 @@ For controller-owned pending document custody and protected downloads, see
 [`docs/CONTROLLER_IDENTITY_EVIDENCE.md`](docs/CONTROLLER_IDENTITY_EVIDENCE.md).
 For transactional custody sessions and authorized PIN rewrap, see
 [`docs/REGISTERED_PROFILE_SESSIONS.md`](docs/REGISTERED_PROFILE_SESSIONS.md).
+For one signature through an existing admitted profile session, see
+[`docs/STORED_PROFILE_SIGNING.md`](docs/STORED_PROFILE_SIGNING.md).
 For registered individual-controller discovery and SMART subject selection, see
 [`docs/REGISTERED_PROFILE_ACCESS.md`](docs/REGISTERED_PROFILE_ACCESS.md).
 
