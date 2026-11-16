@@ -2,7 +2,7 @@ import {createHash,createPublicKey,randomBytes,randomUUID,verify} from 'node:cry
 import {CryptographyService,type PublicJwk} from 'antifraud-data-utils-ts/cryptography'
 import {normalizeUuid} from 'antifraud-data-utils-ts/organization-identity'
 import {CompositionAttesterModes} from 'fhir-data-utils-ts'
-import type {RegisteredProfileBinding,RegisteredProfileRecord,RegisteredProfileSessionRecord,RegisteredProfileAuthorizedSubject} from 'sos-data-utils-ts/registered-profile-contract'
+import type {RegisteredProfileBinding,RegisteredProfileRecord,RegisteredProfileSessionRecord,RegisteredProfileAuthorizedSubject,RegisteredProfileAttester} from 'sos-data-utils-ts/registered-profile-contract'
 import type {PollOptions} from 'sos-data-utils-ts/gateway-transport-contract'
 import {buildScopeSmartCompositionAccess} from 'sos-data-utils-ts/consent-smart-scopes'
 import {RegisteredProfileSessions,type RegisteredProfileSessionsOptions} from './registered-profile-sessions.js'
@@ -29,6 +29,13 @@ type AuthInput=SessionInput&Readonly<{idToken:string}>
 type Session=RegisteredProfileSessionRecord&{id:string}
 type Profile=RegisteredProfileRecord&{id:string}
 export type RegisteredProfileView=Omit<RegisteredProfileRecord,'protectedWalletSeed'|'protectedVpToken'|'failedUnlocks'|'lockedUntil'|'allowedSubjectDids'>&Readonly<{allowedSubjectDids:readonly string[]}>
+
+/** The selected SMART context names its attester through the public owning contract. */
+export type RegisteredProfileSelectedSession=Pick<Awaited<ReturnType<RegisteredProfileAccess['resolveActorSession']>>,
+ 'sessionId'|'profile'|'secureTransportAdapter'|'confidentialStorageAdapter'>&{
+ subjectDid:string;selectedSubjectDid:string;actorMode:RegisteredProfileRecord['actorMode'];scopes:string[];accessToken:string
+ attester?:RegisteredProfileAttester
+}
 type Opened=Awaited<ReturnType<RegisteredProfileSessions['resolve']>>
 const denied=()=>new Error('registered_profile_access_binding_denied')
 const changed=()=>new Error('registered_profile_access_changed_or_revoked')
@@ -231,7 +238,7 @@ export class RegisteredProfileAccess{
   for(const grant of grants){const actual=scope(grant,patient);if(!requested.some(value=>{const allowed=scope(value,patient),actions=allowed.head.split('.')[1]!,grantedActions=actual.head.split('.')[1]!;return [...grantedActions].every(action=>actions.includes(action))&&actual.sections.every(section=>allowed.sections.includes('*')||allowed.sections.includes(section))}))throw denied()}
   return {claims,scopes:grants}
  }
- async selectAuthorizedSubject(input:AuthInput&Readonly<{subjectDid:string;scopes:readonly string[]}>){
+ async selectAuthorizedSubject(input:AuthInput&Readonly<{subjectDid:string;scopes:readonly string[]}>):Promise<RegisteredProfileSelectedSession>{
   const opened=await this.opened(input),assignment=opened.session.authorizedSubjects?.find(subject=>subject.subjectDid===input.subjectDid)
   if(!assignment?.transportSubjectDid||!opened.session.authorizedSubjectDids?.includes(input.subjectDid))throw denied()
   const patient=assignment.transportSubjectDid
@@ -249,7 +256,7 @@ export class RegisteredProfileAccess{
   await this.commit(opened,updated)
   return this.resolveSession(input)
  }
- async resolveSession(input:SessionInput){
+ async resolveSession(input:SessionInput):Promise<RegisteredProfileSelectedSession>{
   const opened=await this.opened(input),session=opened.session
   if(!session.subjectDid||!session.selectedSubjectDid||!session.sealedAccessToken||!session.scopes.length||!session.authorizedSubjects?.some(subject=>subject.subjectDid===session.selectedSubjectDid&&subject.transportSubjectDid===session.subjectDid))throw denied()
   const assignment=session.authorizedSubjects.find(subject=>subject.subjectDid===session.selectedSubjectDid)
