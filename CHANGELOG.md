@@ -2,16 +2,22 @@
 
 ## Unreleased
 
-- Add a purpose-fixed emergency request vault transaction using the shared Core
+- Add `PortalCareVaultProvider.requestEmergency`, a purpose-fixed emergency
+  request vault transaction using the shared Core
   ServiceRequest/triage plan and optional literal patient Communication. Keep
   actor-bound retry receipts, subject equivalence, access callbacks and atomic
   rollback; preserve existing Encounter transactions and authorized links.
-- Apply the Core triage lifecycle through an atomic transition operation.
+- Apply the Core triage lifecycle through `transitionEmergencyTriage`, an
+  atomic transition operation.
   Retain ServiceRequest focus, deny generic-save/profile-downgrade bypasses,
   and update a real linked Encounter and its history in the same transaction.
 - Name selected SMART-session return fields through public owned contracts so
   mixed compatible FHIR versions produce portable declarations. Preserve exact
   registered-access runtime bytes and authority checks.
+- Pin verified public FHIR 0.7.1 and SOS Core 0.7.1. Preserve all other direct
+  versions and lock entries apart from the required nested historical FHIR
+  0.7.0 copies. Fresh registry installation, strict compilation and all 352
+  native cases pass with one worker and zero skips.
 
 ## 0.5.3
 
