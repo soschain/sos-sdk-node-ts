@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.2
 
 - Support an explicit host-only notification policy for workforce invitations:
   seal pending activation codes for authorized controller retrieval while
