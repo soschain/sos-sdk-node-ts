@@ -48,7 +48,9 @@ export class OrganizationRegistrationClient {
   private path(host:HostRouteContext,resource:string,action:string):string{
     const jurisdiction=String(host.jurisdiction||this.options.ctx.jurisdiction).trim()
     const network=String(host.hostNetwork||host.hostNetworkOrTenantSector||'').trim()||(host.sector?'':'test')
-    if(!/^[A-Za-z]{2}(?:-[A-Za-z0-9]{1,3})?$/u.test(jurisdiction)||!['test','local-network','test-network','network'].includes(network))throw new TypeError('organization_registration_host_route_invalid')
+    // Host coverage includes UN M49 regions such as World (001). Preserve
+    // existing ISO-style host contexts independently from the tenant route.
+    if(!/^(?:\d{3}|[A-Za-z]{2}(?:-[A-Za-z0-9]{1,3})?)$/u.test(jurisdiction)||!['test','local-network','test-network','network'].includes(network))throw new TypeError('organization_registration_host_route_invalid')
     return `/host/cds-${encodeURIComponent(jurisdiction)}/v1/${encodeURIComponent(network)}/registry/org.schema/${resource}/${action}`
   }
   private async post(path:string,payload:Record<string,unknown>):Promise<HttpResult>{

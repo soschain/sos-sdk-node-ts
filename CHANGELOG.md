@@ -12,6 +12,17 @@
   Read actual inventory, reserve seats atomically, and let hosts require managed
   capacity before invitations while retaining existing provider behavior.
 
+- Clarify jurisdiction-scoped integration acceptance: unrelated Demo and
+  general technology-sector lifecycles remain independent, and affected
+  regressions remain mandatory without converting failures to skips or green.
+
+- Accept UN M49 host coverage, including World (`001`), when submitting
+  organization verification, credential reissuance and Order requests. Preserve
+  ISO-style host routes, tenant jurisdiction, encryption and response binding.
+  Two genuine failures now pass with malformed-route and retained auth controls;
+  16 focused transport/authentication cases, all 329 native cases and strict
+  compilation pass, with zero skips or retries.
+
 ## 0.5.2
 
 - Support an explicit host-only notification policy for workforce invitations:
