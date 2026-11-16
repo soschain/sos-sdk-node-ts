@@ -7,10 +7,9 @@ import {PROFILE_SECRET_ENVELOPE_VERSION} from 'sos-data-utils-ts/server-profile-
 import type {IVaultRepository} from 'sos-sdk-core-ts/vault-repository'
 import type {ServerProfileSealer} from 'sos-sdk-core-ts/profile-sealer'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
-import type {PortableProfessionalProvider} from './portable-professional-evidence.js'
 import {employeeActivationGrantMatchesContact} from './employee-activation-grant.js'
 import {openServerProfileCustodyKeys} from './server-profile-custody-keys.js'
-import {own,text,json,pick,fingerprint,revision,profileFields,sessionFields,StoredProfileStateInvalidError} from './stored-profile-state.js'
+import {own,text,pick,fingerprint,revision,profileFields,sessionFields,StoredProfileStateInvalidError} from './stored-profile-state.js'
 
 type Row=Record<string,unknown>
 /** A fixed admission denial; backend/KMS operational errors remain distinct. */
@@ -22,8 +21,8 @@ export type RegisteredEmployeeDraftRequesterOptions=Readonly<{
  vault:TransactionalVaultRepository
  sealer:ServerProfileSealer
  collections:Readonly<{profiles:string;walletSessions:string;enrollmentGrants:string}>
- /** Host configuration only. Never populate this catalog from a request body. */
- providers:readonly PortableProfessionalProvider[]
+ /** Same configured enrollment gateway, never supplied by a request body. */
+ gatewayBaseUrl:string
  hostAuthorityDid:string
  now?:()=>Date
 }>
@@ -68,13 +67,9 @@ async function resolve(options:RegisteredEmployeeDraftRequesterOptions,input:Reg
  const contact:ActorContactInput=Object.freeze({contactKind:contactValue.contactKind,contact:normalizeActorContact({contactKind:contactValue.contactKind,contact:text(contactValue.contact)})})
  const names=own(options.collections),collections={profiles:text(names.profiles),walletSessions:text(names.walletSessions),enrollmentGrants:text(names.enrollmentGrants)}
  if(new Set(Object.values(collections)).size!==3)throw denied()
- const catalogValue=json(options.providers)
- if(!Array.isArray(catalogValue)||!catalogValue.length)throw denied()
- const catalog=catalogValue.map(value=>{
-  const entry=own(value),url=new URL(text(entry.baseUrl))
-  if(url.username||url.password||url.search||url.hash||url.pathname!=='/'||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw denied()
-  return {authority:buildAuthorityDidWeb({authority:url.origin}),route:route(entry)}
- })
+ const gateway=new URL(text(options.gatewayBaseUrl))
+ if(gateway.username||gateway.password||gateway.search||gateway.hash||(gateway.protocol!=='https:'&&!(gateway.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(gateway.hostname))))throw denied()
+ if(buildAuthorityDidWeb({authority:gateway.origin})!==authority)throw denied()
  const clock=()=>{const date=now?.()??new Date();if(!(date instanceof Date)||!Number.isFinite(date.getTime()))throw denied();return date.getTime()}
  async function capture(port:IVaultRepository){
   const [rawProfile,rawSession]=await Promise.all([port.get<Row&{id:string}>(collections.profiles,profileId),port.get<Row&{id:string}>(collections.walletSessions,sessionId)])
@@ -83,7 +78,6 @@ async function resolve(options:RegisteredEmployeeDraftRequesterOptions,input:Reg
   const actorDid=text(profile.actorDid),providerDid=text(profile.providerDid),context=route(profile.routeContext)
   if(profile.profileDid!==actorDid||profile.confidentialStorageProfile!=='confidential-pqc-v1')throw denied()
   namespace(providerDid,authority)
-  if(catalog.filter(entry=>entry.authority===authority&&sameRoute(entry.route,context)).length!==1)throw denied()
   text(profile.clientId);const installation=text(profile.clientInstanceId);text(profile.deviceDid)
   if(session.id!==sessionId||session.ownerId!==ownerId||session.profileId!==profileId||revision(session.credentialRevision)!==revision(profile.credentialRevision))throw denied()
   const deadline=Date.parse(text(session.expiresAt))

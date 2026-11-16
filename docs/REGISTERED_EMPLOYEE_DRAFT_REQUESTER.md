@@ -7,10 +7,13 @@ profile ID, existing PIN-session token and that verified contact. A browser's
 chosen role, email, provider or route is not an authority input.
 
 The host options contain its transactional vault, profile sealer, three exact
-collections, configured provider catalog and expected authority DID. Select
-these from server configuration. The operation compares the provider namespace
-with an exact authority delimiter and matches the route against that catalog;
-it does not reconstruct or claim to validate the full organization-DID profile.
+collections, the configured enrollment gateway base URL and expected authority
+DID. Select these from server configuration. The operation compares the
+provider namespace with an exact authority delimiter and binds the route to
+the completed DCR profile and grant. Lookup-directory tenant lists do not
+delimit organizations that completed enrollment. The host still applies its
+existing sector policy. This does not reconstruct or claim to validate the
+full organization-DID profile.
 
 ## Completed enrollment and current custody
 

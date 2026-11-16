@@ -22,7 +22,7 @@ async function setup(kind='phone'){
  const session={id:sessionId,ownerId,profileId,sealedWalletSeed:await sealer.seal(seed,`${ownerId}:${profileId}:${sessionId}:wallet-session-seed`),expiresAt:'2099-01-01T00:00:00Z'}
  const grant={...api.createEmployeeActivationGrant({...contact,employeeDid:actorDid,employeeRoleCode:role,providerDid,routeContext,createdAt:new Date('2020-01-01T00:00:00Z'),expiresAt:new Date('2020-01-02T00:00:00Z')}),id:'synthetic-consumed-grant',tenantIssuer,accessPath:'test-network',consumedEnrollments:[{ownerId,profileId,clientInstanceId}]}
  await vault.put(collections.profiles,profile);await vault.put(collections.walletSessions,session);await vault.put(collections.enrollmentGrants,grant)
- return {vault,sealer,profile,session,grant,options:{vault,sealer,collections,hostAuthorityDid,providers:[{baseUrl:safe.httpsBaseUrl,...routeContext}],now},input:{ownerId,profileId,profileSessionToken:token,verifiedContact:contact}}
+ return {vault,sealer,profile,session,grant,options:{vault,sealer,collections,hostAuthorityDid,gatewayBaseUrl:safe.httpsBaseUrl,now},input:{ownerId,profileId,profileSessionToken:token,verifiedContact:contact}}
 }
 test('retains the owned historical PIN envelope and public key fixture control',async()=>{
  const s=await setup();assert.equal(await api.openServerProfileSecret(s.profile.protectedWalletSeed,'fixture-742619',`${s.profile.profileId}:wallet-seed`,s.sealer),seed)
@@ -39,6 +39,11 @@ test('projects an actual consumed phone enrollment even after its invitation exp
 test('retains verified-email enrollment compatibility without a synthetic phone/email conversion',async()=>{
  const s=await setup('email'),resolve=need(),result=await resolve(s.options,s.input)
  assert.equal(result.actorDid,s.profile.actorDid);assert.equal(result.recordedRole,role)
+})
+test('admits the completed organization under its configured enrollment host without a lookup-directory tenant entry',async()=>{
+ const s=await setup(),resolve=need()
+ const result=await resolve({vault:s.vault,sealer:s.sealer,collections,hostAuthorityDid,gatewayBaseUrl:safe.httpsBaseUrl,now},s.input)
+ assert.equal(result.recordedRole,role);assert.equal(result.profileId,s.profile.profileId)
 })
 test('does not turn an unconsumed invitation into employee authority',async()=>{
  const s=await setup(),resolve=need(),{consumedEnrollments:_consumed,...pending}=s.grant
