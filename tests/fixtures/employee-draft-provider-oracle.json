@@ -1,0 +1,10 @@
+{
+  "syntheticOnly": true,
+  "hostAuthorityDid": "did:web:example.invalid",
+  "routeContext": {
+    "tenantId": "example-tenant",
+    "jurisdiction": "CA",
+    "sector": "animal-care"
+  },
+  "providerDid": "did:web:example.invalid:example-tenant:cds-CA:v1:animal-care"
+}

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Resolve the public requester of a draft permission proposal from current
+  PIN-sealed custody and the exact completed employee-enrollment record.
+  Bind verified phone/email, role, provider, route and installation; retain
+  completed enrollment evidence after invitation expiry and reject stale
+  sessions or changes during key opening.
+
 - Sign one admitted stored-profile payload through fixed individual VP or
   organization detached ES384 profiles. Preserve existing seed derivation,
   session AAD, public keys and revision-zero rows; recheck current profile and

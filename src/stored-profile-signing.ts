@@ -6,6 +6,7 @@ import type {ServerProfileSealer} from 'sos-sdk-core-ts/profile-sealer'
 import type {IVaultRepository} from 'sos-sdk-core-ts/vault-repository'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 import {deriveProfileEcSigningMaterial} from './profile-ec-signing-material.js'
+import {text,own,json,pick,fingerprint,revision,profileFields,sessionFields} from './stored-profile-state.js'
 
 type Row=Record<string,unknown>
 export type StoredProfileSigningOptions=Readonly<{
@@ -19,51 +20,6 @@ export type StoredProfileSigningOptions=Readonly<{
 }>
 const denied=()=>new Error('stored_profile_signing_binding_denied')
 const stale=()=>new Error('stored_profile_signing_state_changed')
-function text(value:unknown,maximum=4096):string{
- if(typeof value!=='string'||!value||value.trim()!==value||value.length>maximum||value.includes('\0'))throw denied()
- return value
-}
-function own(value:unknown):Row{
- if(!value||typeof value!=='object'||![Object.prototype,null].includes(Object.getPrototypeOf(value))||Object.getOwnPropertySymbols(value).length)throw denied()
- const result:Row=Object.create(null)
- for(const[name,entry]of Object.entries(Object.getOwnPropertyDescriptors(value))){if(!('value'in entry))throw denied();result[name]=entry.value}
- return result
-}
-function json(value:unknown,seen=new Set<object>()):unknown{
- if(value===null||typeof value==='string'||typeof value==='boolean')return value
- if(typeof value==='number'&&Number.isFinite(value))return value
- if(!value||typeof value!=='object'||seen.has(value))throw denied()
- seen.add(value)
- try{
-  if(Array.isArray(value)){
-   if(Object.getPrototypeOf(value)!==Array.prototype)throw denied()
-   const fields=Object.getOwnPropertyDescriptors(value),out:unknown[]=[]
-   for(let index=0;index<value.length;index++){const field=fields[String(index)];if(!field||!('value'in field))throw denied();out.push(json(field.value,seen))}
-   return out
-  }
-  const result:Row=Object.create(null)
-  for(const[name,entry]of Object.entries(own(value)))result[name]=json(entry,seen)
-  return result
- }finally{seen.delete(value)}
-}
-function pick(value:Row,names:readonly string[]):Row{
- const result:Row=Object.create(null)
- for(const name of names)if(value[name]!==undefined)result[name]=json(value[name])
- return result
-}
-function fingerprint(value:unknown):string{
- if(Array.isArray(value))return `[${value.map(fingerprint).join(',')}]`
- if(value&&typeof value==='object')return `{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${fingerprint((value as Row)[key])}`).join(',')}}`
- return JSON.stringify(value)
-}
-function revision(value:unknown):number{
- if(value===undefined)return 0
- if(typeof value!=='number'||!Number.isSafeInteger(value)||value<0)throw denied()
- return value
-}
-const profileFields=['id','profileId','ownerId','actorKind','actorMode','actorDid','profileDid','providerDid','routeContext','allowedSubjectDids','clientId','clientInstanceId','deviceDid','publicJwks','storagePublicJwk','confidentialStorageProfile','walletKeyDerivationId','protectedWalletSeed','protectedVpToken','failedUnlocks','lockedUntil','createdAt','updatedAt','attester','clinicalCreatorBinding','tenantIssuer','credentialRevision'] as const
-const sessionFields=['id','sessionId','ownerId','profileId','subjectDid','selectedSubjectDid','scopes','authorizedSubjectDids','authorizedSubjects','actorMode','attester','sealedUnlockedWalletSeed','sealedUnlockedVpToken','sealedAccessToken','sealedWalletSeed','expiresAt','credentialRevision'] as const
-
 /**
  * Signs one admitted stored-profile operation. It neither verifies domain
  * credentials nor grants a role, subject relationship, licence or SMART scope.

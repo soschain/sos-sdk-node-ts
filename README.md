@@ -51,6 +51,8 @@ For transactional custody sessions and authorized PIN rewrap, see
 [`docs/REGISTERED_PROFILE_SESSIONS.md`](docs/REGISTERED_PROFILE_SESSIONS.md).
 For one signature through an existing admitted profile session, see
 [`docs/STORED_PROFILE_SIGNING.md`](docs/STORED_PROFILE_SIGNING.md).
+For an employee's recorded identity when proposing draft permissions, see
+[`docs/REGISTERED_EMPLOYEE_DRAFT_REQUESTER.md`](docs/REGISTERED_EMPLOYEE_DRAFT_REQUESTER.md).
 For registered individual-controller discovery and SMART subject selection, see
 [`docs/REGISTERED_PROFILE_ACCESS.md`](docs/REGISTERED_PROFILE_ACCESS.md).
 

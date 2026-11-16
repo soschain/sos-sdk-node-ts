@@ -12,6 +12,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./registered-employee-draft-requester": {
+      "types": "./dist/registered-employee-draft-requester.d.ts",
+      "default": "./dist/registered-employee-draft-requester.js"
+    },
     "./stored-profile-signing": {
       "types": "./dist/stored-profile-signing.d.ts",
       "default": "./dist/stored-profile-signing.js"
