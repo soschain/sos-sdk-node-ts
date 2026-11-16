@@ -301,6 +301,23 @@ merge canonical resources under one organization with a revision check.
 Email delivery stays behind an injected provider and is never performed
 inside a vault transaction.
 
+`OrganizationWorkforceVaultProvider` defaults to `invitationDeliveryPolicy:
+'required'`. A trusted host may explicitly select `'notification-only'` and
+inject a stable `ServerProfileSealer`. Delivery is still attempted and a failed
+notification remains `delivery: 'failed'`; the authorized controller's `list`
+can retrieve `activationCode` only for a current pending invitation. Ciphertext
+is bound to its collection, organization, recipient, role, profile and expiry,
+and is removed atomically on successful activation. Sealing and unsealing stay
+outside datastore transactions, with authority and current-record rechecks.
+Keep this constructor policy under host control, never request input.
+
+Pending legacy hash-only rows return `requiresReissue: true` under the opt-in
+policy. Listing never recovers or rotates their code: the controller must
+explicitly invoke the normal invitation operation again. Required-delivery
+providers cannot reveal or activate a failed opt-in invitation. This policy
+changes notification availability only; recipient, code, expiry, capacity and
+single-use checks remain mandatory.
+
 Demo BFFs can use these providers with memory or the configured durable vault.
 The network composition retains its authorized SDK/GW provider for the same
 commands. This adds no separate Demo database or professional authority.
