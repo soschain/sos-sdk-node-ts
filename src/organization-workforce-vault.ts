@@ -10,8 +10,8 @@ export type OrganizationWorkforceSeat=Readonly<{
   employee:OrganizationEmployeeLifecycleRecord;groups?:readonly string[]
 }>
 export type OrganizationWorkforceInstallation=Readonly<{clientInstanceId:string;name:string}>
-export type OrganizationWorkforceRegistration=OrganizationWorkforceInstallation & Readonly<{registrationId:string}>
-type StoredSeat=OrganizationWorkforceSeat & Readonly<{installation?:OrganizationWorkforceRegistration;protectedActivationCode?:string;invitationDeliveryPolicy?:'notification-only'}>
+export type OrganizationWorkforceRegistration=OrganizationWorkforceInstallation & Readonly<{registrationId:string;generation:number}>
+type StoredSeat=OrganizationWorkforceSeat & Readonly<{installation?:OrganizationWorkforceRegistration;installationSuspended?:boolean;protectedActivationCode?:string;invitationDeliveryPolicy?:'notification-only'}>
 type StoredCapacity=Readonly<{id:string;organizationReference:string;contracted:number}>
 type StoredCapacityOperation=Readonly<{id:string;organizationReference:string;operationId:string;quantity:number}>
 export type OrganizationWorkforceInvitation=OrganizationWorkforceSeat & Readonly<{activationCode?:string;requiresReissue?:boolean}>
@@ -45,7 +45,7 @@ export class OrganizationWorkforceVaultProvider{
     return JSON.stringify(['sos-workforce-invitation-v1',this.options.collection,seat.id,seat.organizationReference,seat.email,seat.profileId,seat.sector,seat.role,seat.employee.roleCode,seat.employee.employeeDid,seat.expiresAt,seat.credentialHash])
   }
   private publicSeat(seat:StoredSeat):OrganizationWorkforceSeat{
-    const {protectedActivationCode: _protected,invitationDeliveryPolicy: _policy,installation: _installation,...visible}=seat
+    const {protectedActivationCode: _protected,invitationDeliveryPolicy: _policy,installation: _installation,installationSuspended: _suspended,...visible}=seat
     return visible
   }
   private installationLimit(){
@@ -187,7 +187,7 @@ export class OrganizationWorkforceVaultProvider{
       if(this.options.requireInstallation||seat.employee.license){
         if(!installation||typeof installation.clientInstanceId!=='string'||!installation.clientInstanceId.trim()||installation.clientInstanceId.length>160||typeof installation.name!=='string'||!installation.name.trim()||installation.name.length>160)throw new OrganizationWorkforceError('employee_installation_required',400)
         if(!seat.employee.license||!Number.isSafeInteger(seat.employee.license.maxDevices)||seat.employee.license.maxDevices<1)throw new OrganizationWorkforceError('employee_installation_policy_invalid',409)
-        registration=Object.freeze({clientInstanceId:installation.clientInstanceId.trim(),name:installation.name.trim(),registrationId:randomUUID()})
+        registration=Object.freeze({clientInstanceId:installation.clientInstanceId.trim(),name:installation.name.trim(),registrationId:randomUUID(),generation:1})
       }
       const visible=this.publicSeat(seat)
       const result=await createProfile(visible,tx,registration)
@@ -207,7 +207,7 @@ export class OrganizationWorkforceVaultProvider{
     if(!active.employee.license)return undefined // Retained legacy seats have no invented installation inventory.
     const seat=await this.options.store.get<StoredSeat>(this.options.collection,active.id)
     const registration=seat?.installation
-    if(!seat||seat.email!==email(verifiedEmail)||seat.sector!==sector||seat.profileId!==profileId||seat.status!=='active'||seat.expiresAt<=this.now()||!registration||registration.clientInstanceId!==clientInstanceId||!seat.employee.license?.devices.some(device=>device.clientId===registration.registrationId&&device.status==='active'))throw new OrganizationWorkforceError('employee_installation_required',403)
+    if(!seat||seat.email!==email(verifiedEmail)||seat.sector!==sector||seat.profileId!==profileId||seat.status!=='active'||seat.expiresAt<=this.now()||!registration||!Number.isSafeInteger(registration.generation)||registration.generation<1||registration.clientInstanceId!==clientInstanceId||!seat.employee.license?.devices.some(device=>device.clientId===registration.registrationId&&device.status==='active'))throw new OrganizationWorkforceError('employee_installation_required',403)
     return Object.freeze({...registration})
   }
   async revokeDevice(organizationReference:string,id:string,licenseId:string,clientId:string){
@@ -216,19 +216,29 @@ export class OrganizationWorkforceVaultProvider{
       const seat=await tx.get<StoredSeat>(this.options.collection,id),license=seat?.employee.license
       if(!seat||seat.organizationReference!==organizationReference||seat.expiresAt<=this.now()||!license||license.id!==licenseId||!license.devices.some(device=>device.clientId===clientId))throw new OrganizationWorkforceError('employee_device_not_found',404)
       const devices=license.devices.map(device=>device.clientId===clientId?{...device,status:'revoked' as const}:device)
-      await tx.put(this.options.collection,{...seat,employee:{...seat.employee,license:{...license,devices,activeDevices:devices.filter(device=>device.status==='active').length}}})
+      await tx.put(this.options.collection,{...seat,...(seat.installation?.registrationId===clientId?{installationSuspended:false}:{}),employee:{...seat.employee,license:{...license,devices,activeDevices:devices.filter(device=>device.status==='active').length}}})
     })
   }
   async change(organizationReference:string,id:string,action:string){
     await this.options.assertManage(organizationReference)
     await this.options.store.runTransaction(async tx=>{
-      const seat=await tx.get<OrganizationWorkforceSeat>(this.options.collection,id)
+      const seat=await tx.get<StoredSeat>(this.options.collection,id)
       if(!seat||seat.organizationReference!==organizationReference||seat.expiresAt<=this.now())throw new OrganizationWorkforceError('employee_not_found',404)
       if(action==='purge'){if(seat.status!=='inactive')throw new OrganizationWorkforceError('employee_must_be_disabled_before_purge',409);await tx.delete(this.options.collection,id);return}
       if(!['disable','reactivate'].includes(action))throw new OrganizationWorkforceError('employee_action_invalid',400)
       if(seat.status==='pending')throw new OrganizationWorkforceError('employee_activation_required',409)
-      const license=seat.employee.license
-      await tx.put(this.options.collection,{...seat,status:action==='disable'?'inactive':'active',...(action==='disable'&&license?{employee:{...seat.employee,license:{...license,activeDevices:0,devices:license.devices.map(device=>({...device,status:'revoked' as const}))}}}:{})})
+      const license=seat.employee.license,installation=seat.installation
+      let nextInstallation=installation,suspended=seat.installationSuspended??false,devices=license?.devices
+      if(action==='disable'&&seat.status!=='inactive'&&installation&&license){
+        if(!Number.isSafeInteger(installation.generation)||installation.generation<1||installation.generation>=Number.MAX_SAFE_INTEGER)throw new OrganizationWorkforceError('employee_installation_policy_invalid',409)
+        suspended=license.devices.some(device=>device.clientId===installation.registrationId&&device.status==='active')
+        nextInstallation={...installation,generation:installation.generation+1}
+        devices=license.devices.map(device=>({...device,status:'revoked' as const}))
+      }else if(action==='reactivate'&&installation&&license&&suspended){
+        devices=license.devices.map(device=>device.clientId===installation.registrationId?{...device,status:'active' as const}:device)
+        suspended=false
+      }
+      await tx.put(this.options.collection,{...seat,status:action==='disable'?'inactive':'active',...(nextInstallation?{installation:nextInstallation,installationSuspended:suspended}:{}),...(license&&devices?{employee:{...seat.employee,license:{...license,status:action==='disable'?'inactive':'active',devices,activeDevices:devices.filter(device=>device.status==='active').length}}}:{})})
     })
   }
   async setGroup(organizationReference:string,id:string,group:string,enabled:boolean){

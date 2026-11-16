@@ -342,7 +342,9 @@ registrations are not GW DCR receipts or physical-device attestations.
 `requireActiveInstallation` rechecks the exact stored browser/role binding.
 Controller-authorized `revokeDevice` targets its actual registration ID;
 disabling an employee revokes that role's registrations without changing other
-roles. Hosts must use these current checks at their protected request boundary,
+roles. Reactivation restores only the suspended role binding and requires a
+fresh PIN-opened session generation; an explicitly revoked browser stays
+revoked. Hosts must use these current checks at their protected request boundary,
 rather than trusting an earlier session unlock.
 
 Vault capacity is an operational allocation; Network
