@@ -275,6 +275,15 @@ ServiceRequest and patient Communication writes use this transaction rather than
 generic resource saves. The BFF retains responsibility for current subject,
 service, recipient and role authority through the existing access callbacks.
 
+`transitionEmergencyTriage` and the `emergency-triage` peer operation apply the
+shared Core Task lifecycle with the current Task revision and host-resolved
+responder. A real linked Encounter also requires its current revision when
+starting or completing care; its status and immutable history commit with the
+Task. Without an Encounter link, triage changes the Task only. Repeated operation
+IDs return the committed result without duplicating milestones. Emergency Task
+updates use this operation so a generic save cannot skip the lifecycle or remove
+the stored profile to bypass its checks.
+
 `sos-sdk-node-ts/portal-consent-vault` exposes `PortalConsentVaultProvider` over the same
 injected transactional vault repository, using a separate collection scoped by
 workspace, subject and generation. Store flat Consent claims. Native FHIR

@@ -3,7 +3,7 @@ import {TaskService,type TaskRecord,type TaskRepository,type ListTasksQuery} fro
 import type {IVaultRepository} from 'sos-sdk-core-ts/vault-repository'
 import {CommunicationClaim,canonicalClinicalSubjectReference} from 'fhir-data-utils-ts'
 import {ServiceRequestClaim} from 'fhir-data-utils-ts/claims'
-import {orchestrateEmergencyRequest,type EmergencyRequestInput} from 'sos-sdk-core-ts/care-emergency-alert-orchestration'
+import {orchestrateEmergencyRequest,readEmergencyTriageTask,transitionEmergencyTriageTask,type EmergencyRequestInput,type EmergencyTriageAction} from 'sos-sdk-core-ts/care-emergency-alert-orchestration'
 import {CommunicationCategoryCodes} from 'fhir-data-utils-ts'
 import {createCommMsgExtendedDraft} from 'sos-sdk-core-ts/communication-message-draft'
 import {buildSubjectCommunicationGroupReference} from 'sos-data-utils-ts/subject-communication-group'
@@ -30,11 +30,17 @@ export type PortalCareNotification=Readonly<{
   communication:ReturnType<typeof createCommMsgExtendedDraft>['message']
 }>
 export type PortalCareSaveOptions=Readonly<{expectedRevision?:number;remindAt?:string|null}>
+/** The host resolves the current responder and optional escalation destination from its verified context. */
+export type PortalEmergencyTriageMutation=Readonly<{
+  operationId:string;taskReference:string;expectedRevision:number;action:EmergencyTriageAction;responderReference:string
+  escalationOwnerReference?:string;encounterExpectedRevision?:number
+}>
 export type PortalCareOperation=
   | Readonly<{kind:'search';resourceType:PortalCareResourceType}>
   | Readonly<{kind:'save';entry:FlatClaimResourceEntry;mode:'create'|'update';options?:PortalCareSaveOptions}>
   | Readonly<{kind:'encounter';mutation:PortalEncounterMutation}>
   | Readonly<{kind:'emergency';request:EmergencyRequestInput}>
+  | Readonly<{kind:'emergency-triage';mutation:PortalEmergencyTriageMutation}>
   | Readonly<{kind:'notifications'}>
   | Readonly<{kind:'acknowledge';id:string}>
   | Readonly<{kind:'tick'}>
@@ -108,7 +114,7 @@ export class PortalCareVaultProvider {
   async save(raw:FlatClaimResourceEntry,mode:'create'|'update',options:PortalCareSaveOptions={}):Promise<PortalCareStoredResource>{
     const entry=this.normalize(raw)
     if(entry.resourceType==='EncounterHistory')throw new TypeError('care_history_write_requires_encounter_transaction')
-    if(entry.resourceType==='ServiceRequest'||entry.resourceType==='Communication')throw new TypeError('care_emergency_write_requires_transaction')
+    if(entry.resourceType==='ServiceRequest'||entry.resourceType==='Communication'||isEmergencyTriage(entry))throw new TypeError('care_emergency_write_requires_transaction')
     if(mode!=='create'&&mode!=='update')throw new TypeError('care_mutation_invalid')
     const remindAt=this.reminderDate(entry,options)
     return this.options.store.runTransaction(async transaction=>{
@@ -116,6 +122,7 @@ export class PortalCareVaultProvider {
       await this.options.assertResourceAccess?.(transaction,'write',entry)
       const id=this.resourceId(entry),previous=await transaction.get<PortalCareStoredResource>(this.collectionNames.resources,id)
       if(previous&&this.owns(previous))await this.options.assertResourceAccess?.(transaction,'write',previous.entry)
+      if(previous&&this.owns(previous)&&isEmergencyTriage(previous.entry))throw new TypeError('care_emergency_write_requires_transaction')
       if(previous&&this.owns(previous)&&equal(previous.entry,entry)&&previous.remindAt===remindAt)return previous
       if(mode==='create'&&previous)throw new Error('care_resource_conflict')
       if(mode==='update'&&(!previous||!this.owns(previous)))throw new Error('care_resource_not_found')
@@ -162,6 +169,67 @@ export class PortalCareVaultProvider {
         subjectIdentifier:this.options.subjectIdentifier,expiresAt:this.options.expiresAt})
     })
     return [...await this.search('ServiceRequest'),...await this.search('Task'),...(plan.communicationEntry?await this.search('Communication'):[])]
+  }
+
+  /** Core triage and an existing linked Encounter share one atomic operation and retry receipt. */
+  async transitionEmergencyTriage(mutation:PortalEmergencyTriageMutation):Promise<readonly PortalCareStoredResource[]>{
+    const keys=['operationId','taskReference','expectedRevision','action','responderReference','escalationOwnerReference','encounterExpectedRevision']
+    if(!mutation||typeof mutation!=='object'||Array.isArray(mutation)||Object.keys(mutation).some(key=>!keys.includes(key))
+      ||typeof mutation.operationId!=='string'||!/^[A-Za-z0-9._-]{1,96}$/u.test(mutation.operationId)
+      ||typeof mutation.taskReference!=='string'||!/^Task\/[A-Za-z0-9._-]{1,128}$/u.test(mutation.taskReference)
+      ||!Number.isInteger(mutation.expectedRevision)||mutation.expectedRevision<1)throw new TypeError('care_emergency_triage_mutation_invalid')
+    const fingerprint=hash(JSON.stringify({actor:this.options.actorIdentifier,mutation}))
+    const receipts=`${this.collectionNames.resources}_operations`
+    const id=hash([this.options.scopeKey,this.options.generationId,this.options.subjectIdentifier,'emergency-triage',mutation.operationId].join('\0'))
+    await this.options.store.runTransaction(async transaction=>{
+      await this.authorize(transaction,'write','Task')
+      const rows=await this.resources(transaction),previous=rows.find(row=>row.entry.reference===mutation.taskReference)
+      if(!previous||!isEmergencyTriage(previous.entry))throw new Error('care_emergency_triage_not_found')
+      await this.options.assertResourceAccess?.(transaction,'write',previous.entry)
+      const current=readEmergencyTriageTask(this.normalize(previous.entry))
+      await this.authorize(transaction,'read','ServiceRequest')
+      const request=rows.find(row=>row.entry.reference===current.focusReference&&row.entry.resourceType==='ServiceRequest')
+      if(!request)throw new Error('care_emergency_request_not_found')
+      this.normalize(request.entry)
+      if(mutation.action!=='acknowledge'&&current.ownerReference!==mutation.responderReference
+        ||mutation.action==='acknowledge'&&!current.ownerReference.startsWith('Group/')&&current.ownerReference!==mutation.responderReference)throw new Error('care_emergency_responder_owner_required')
+      const receipt=await transaction.get<{id:string;fingerprint:string}>(receipts,id)
+      if(receipt){if(receipt.fingerprint!==fingerprint)throw new Error('care_emergency_idempotency_conflict');return}
+      if(previous.revision!==mutation.expectedRevision)throw new Error('care_revision_conflict')
+      if(mutation.action==='acknowledge'&&!current.ownerReference.startsWith('Group/'))throw new Error('care_emergency_triage_group_owner_required')
+      const at=new Date(this.now()).toISOString()
+      const entries:FlatClaimResourceEntry[]=[this.normalize(transitionEmergencyTriageTask({taskEntry:previous.entry,action:mutation.action,
+        responderReference:mutation.responderReference,escalationOwnerReference:mutation.escalationOwnerReference,occurredAt:at}))]
+      const encounterReference=request.entry.claims[ServiceRequestClaim.Encounter]
+      if(encounterReference&&(mutation.action==='start'||mutation.action==='complete')){
+        const encounter=rows.find(row=>row.entry.reference===encounterReference&&row.entry.resourceType==='Encounter')
+        if(!encounter)throw new Error('care_emergency_encounter_not_found')
+        if(!Number.isInteger(mutation.encounterExpectedRevision)||encounter.revision!==mutation.encounterExpectedRevision)throw new Error('care_revision_conflict')
+        await this.authorize(transaction,'write','Encounter')
+        await this.options.assertResourceAccess?.(transaction,'write',encounter.entry)
+        const status=mutation.action==='start'?EncounterStatusR5.InProgress:EncounterStatusR5.Completed
+        if(encounter.entry.claims[EncounterClaim.Status]!==status)entries.push(...planPortalEncounterChange({
+          subjectIdentifier:this.options.subjectIdentifier,source:encounter.entry,occurredAt:at,historyId:`${mutation.operationId}-triage`,status,
+        }))
+      }
+      for(const entry of entries){await this.authorize(transaction,'write',resourceTypeOf(entry.reference));await this.options.assertResourceAccess?.(transaction,'write',entry)}
+      const jobs=await this.taskRepository(transaction),engine=this.taskService(jobs),records:PortalCareStoredResource[]=[]
+      for(const raw of entries){
+        const entry=this.normalize(raw),old=rows.find(row=>row.entry.reference===entry.reference)
+        if(entry.resourceType==='EncounterHistory'&&(old||await transaction.get(this.collectionNames.resources,this.resourceId(entry))))throw new Error('encounter_history_immutable')
+        const record=this.record(entry,(old?.revision??0)+1,this.reminderDate(entry,{remindAt:old?.remindAt??null}))
+        if(entry.resourceType==='Task'||entry.resourceType==='Encounter')await this.replaceReminder(engine,jobs,record)
+        records.push(record)
+      }
+      const notice=this.notice(records[0],hash(`emergency-triage-notice\0${id}`),'Emergency triage updated')
+      await this.options.enqueueNotice?.(transaction,notice)
+      for(const record of records)await transaction.put(this.collectionNames.resources,record)
+      await transaction.put(this.collectionNames.communications,notice)
+      await jobs.flush()
+      await transaction.put(receipts,{id,fingerprint,scopeKey:this.options.scopeKey,generationId:this.options.generationId,
+        subjectIdentifier:this.options.subjectIdentifier,expiresAt:this.options.expiresAt})
+    })
+    return this.search('Task')
   }
 
   /** One transaction owns the stages, immutable milestones, notification and retry receipt. */
@@ -394,11 +462,12 @@ export class PortalCareVaultProvider {
 /** Shared operation boundary; callers supply the already authorized provider, never browser authority flags. */
 export async function executePortalCareOperation(provider:PortalCareVaultProvider,input:PortalCareOperation):Promise<PortalCareOperationResult>{
   if(!input||typeof input!=='object'||Array.isArray(input))throw new TypeError('care_operation_invalid')
-  const allowed:Record<string,readonly string[]>={search:['kind','resourceType'],save:['kind','entry','mode','options'],encounter:['kind','mutation'],emergency:['kind','request'],notifications:['kind'],acknowledge:['kind','id'],tick:['kind']}
+  const allowed:Record<string,readonly string[]>={search:['kind','resourceType'],save:['kind','entry','mode','options'],encounter:['kind','mutation'],emergency:['kind','request'],'emergency-triage':['kind','mutation'],notifications:['kind'],acknowledge:['kind','id'],tick:['kind']}
   if(!allowed[input.kind]||Object.keys(input).some(key=>!allowed[input.kind].includes(key)))throw new TypeError('care_operation_invalid')
   if(input.kind==='search')return {kind:'resources',resources:await provider.search(input.resourceType)}
   if(input.kind==='encounter')return {kind:'resources',resources:await provider.mutateEncounter(input.mutation)}
   if(input.kind==='emergency')return {kind:'resources',resources:await provider.requestEmergency(input.request)}
+  if(input.kind==='emergency-triage')return {kind:'resources',resources:await provider.transitionEmergencyTriage(input.mutation)}
   if(input.kind==='save'){
     if(input.options&&(Object.keys(input.options).some(key=>!['expectedRevision','remindAt'].includes(key))
       ||(input.options.expectedRevision!==undefined&&(!Number.isInteger(input.options.expectedRevision)||input.options.expectedRevision<1))))throw new TypeError('care_mutation_invalid')
@@ -425,6 +494,7 @@ class BufferedVaultTaskRepository implements TaskRepository {
 function hash(value:string){return createHash('sha256').update(value).digest('hex')}
 function referenceIdentity(value:string){return value.trim().replace(/^(?:Patient|Organization)\//u,'')}
 function resourceTypeOf(reference:string){const type=reference.split('/')[0];assertResourceType(type);return type}
+function isEmergencyTriage(entry:FlatClaimResourceEntry){return entry.resourceType==='Task'&&entry.claims[TaskClaim.Code]==='triage'&&entry.claims[TaskClaim.Focus]?.startsWith('ServiceRequest/')}
 function assertResourceType(value:unknown):asserts value is PortalCareResourceType{if(!['Appointment','Encounter','EncounterHistory','Task','ServiceRequest','Communication'].includes(String(value)))throw new TypeError('care_resource_type_invalid')}
 function terminal(entry:FlatClaimResourceEntry){return ['cancelled','completed','fulfilled','finished','entered-in-error'].includes(entry.claims[`${entry.resourceType}.status`]||'')}
 function equal(a:FlatClaimResourceEntry,b:FlatClaimResourceEntry){return a.reference===b.reference&&JSON.stringify(Object.entries(a.claims).sort())===JSON.stringify(Object.entries(b.claims).sort())}

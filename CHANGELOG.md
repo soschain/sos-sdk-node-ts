@@ -6,6 +6,12 @@
   ServiceRequest/triage plan and optional literal patient Communication. Keep
   actor-bound retry receipts, subject equivalence, access callbacks and atomic
   rollback; preserve existing Encounter transactions and authorized links.
+- Apply the Core triage lifecycle through an atomic transition operation.
+  Retain ServiceRequest focus, deny generic-save/profile-downgrade bypasses,
+  and update a real linked Encounter and its history in the same transaction.
+- Name selected SMART-session return fields through public owned contracts so
+  mixed compatible FHIR versions produce portable declarations. Preserve exact
+  registered-access runtime bytes and authority checks.
 
 ## 0.5.3
 
