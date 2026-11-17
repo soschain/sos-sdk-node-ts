@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add the shared Madrid public dental-registry reader and authenticated read-only
+  HTTP composition for all portal modes. Bound downloads, coalesce daily source
+  reads, reject conflicting registrations and keep NIF indexes server-side.
+  Unlabelled source X/Y values are not treated as GPS; radius searches require
+  explicit reviewed WGS84 enrichment. Focused source/HTTP tests pass; the full
+  SDK build remains blocked by existing unpublished SOS data exports.
+
 - Resolve the public requester of a draft permission proposal from current
   PIN-sealed custody and the exact completed employee-enrollment record.
   Bind verified phone/email, role, provider, route and installation; retain
