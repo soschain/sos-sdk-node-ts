@@ -12,6 +12,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./public-registry-http": {
+      "types": "./dist/public-registry-http.d.ts",
+      "default": "./dist/public-registry-http.js"
+    },
+    "./madrid-public-registry": {
+      "types": "./dist/madrid-public-registry.d.ts",
+      "default": "./dist/madrid-public-registry.js"
+    },
     "./registered-employee-draft-requester": {
       "types": "./dist/registered-employee-draft-requester.d.ts",
       "default": "./dist/registered-employee-draft-requester.js"

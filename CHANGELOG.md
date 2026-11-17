@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add the shared Madrid public dental-registry reader and authenticated read-only
+  HTTP composition for all portal modes. Bound downloads, coalesce daily source
+  reads, reject conflicting registrations and keep NIF indexes server-side.
+  Unlabelled source X/Y values are not treated as GPS; radius searches require
+  explicit reviewed WGS84 enrichment. On 2026-11-17, the complete Node 26.13.0
+  SDK build and all 387 tests passed with immutable local Antifraud/SOS Data
+  packages. A compatible exact public-registry release cohort is still pending.
+
 - Resolve the public requester of a draft permission proposal from current
   PIN-sealed custody and the exact completed employee-enrollment record.
   Bind verified phone/email, role, provider, route and installation; retain

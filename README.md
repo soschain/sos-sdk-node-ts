@@ -393,3 +393,14 @@ providers. Scheduling write capability is separate from encounter write
 capability; receiving an appointment assignment never grants clinical
 authorship. The SDK preserves those host-supplied capabilities over the
 authenticated peer boundary.
+### Public registry discovery
+
+`madrid-public-registry` provides the bounded public Madrid dental-source
+reader. `public-registry-http` composes account authorization with that reader
+for both portal audiences and all access modes. Source records are real
+discovery evidence; a listing is neither membership nor a published service.
+The reader keeps exact identifier indexes private, caches the source rather
+than user queries and never interprets unlabelled projected coordinates as
+latitude/longitude. Composition roots may inject reviewed geographic points;
+the optional reviewed configuration parser requires an explicit WGS84 CRS and
+evidence reference. No paid geocoder is called.
