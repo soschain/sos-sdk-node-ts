@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
+
+- Include the owned public KEM reply key in the protected transport header and
+  bind its existing thumbprint in the inner signed header. Preserve key
+  derivation and custody while allowing the gateway to validate the intended
+  encrypted response recipient before device registration.
 
 - Add the shared Madrid public dental-registry reader and authenticated read-only
   HTTP composition for all portal modes. Bound downloads, coalesce daily source
