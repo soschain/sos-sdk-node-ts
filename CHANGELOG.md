@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Bind the operational Encounter Consent group independently of the
+  department triage queue. Require its explicit trusted-host reference;
+  neither group may substitute for the other during admission or Task updates.
+
 - Add a purpose-fixed registered employee Task triage client. Reopen current
   PIN/DCR-bound custody, require independent active Encounter Consent, and
   bind clinical creator, group and both Encounter capabilities. Keep Task

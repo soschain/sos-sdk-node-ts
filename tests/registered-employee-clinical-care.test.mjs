@@ -1,4 +1,4 @@
-﻿// Flow contract: a registered member's current PIN/DCR identity and independent active Encounter Consent admit only fixed Task triage reads/transitions. Real AES/full-PQC custody and signed/encrypted GW peers bind issuer/audience/thread; GW licence denials remain denials. No generic transport, controller opener, browser role, native-FHIR payload or arbitrary route grants authority.
+// Flow contract: a registered member's current PIN/DCR identity and independent active Encounter Consent admit only fixed Task triage reads/transitions. Real AES/full-PQC custody and signed/encrypted GW peers bind issuer/audience/thread; GW licence denials remain denials. No generic transport, controller opener, browser role, native-FHIR payload or arbitrary route grants authority.
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {createHash,randomBytes,randomUUID} from 'node:crypto'
@@ -62,7 +62,7 @@ async function fixture(contactKind='phone'){
   const responsePacked=await peer.packForRecipientWithContext(response,actorDid,{context:peerContext});await state.afterDecrypt?.()
   return new Response(new URLSearchParams({response:responsePacked}).toString(),{status:200})
  }
- const options={vault,sealer,collections,gateway:{baseUrl,hostAuthorityDid,providerDid,responseIssuer:providerDid,resolveRecipientJwk:async did=>{assert.equal(did,providerDid);return peerKeys.encryption},resolveGatewaySigningJwk:async did=>{assert.equal(did,providerDid);return state.fault==='key'?{...peerKeys.signing,kid:'wrong-gateway-key'}:peerKeys.signing}},triageRouting:{professionalGroupReference:groupReference,escalationGroupReference:`Group/${safe.demoOrganizationUuids.animalCare}`},fetchImpl,pollOptions:{intervalMs:0,timeoutMs:1000},now:()=>new Date(clock)}
+ const options={vault,sealer,collections,gateway:{baseUrl,hostAuthorityDid,providerDid,responseIssuer:providerDid,resolveRecipientJwk:async did=>{assert.equal(did,providerDid);return peerKeys.encryption},resolveGatewaySigningJwk:async did=>{assert.equal(did,providerDid);return state.fault==='key'?{...peerKeys.signing,kid:'wrong-gateway-key'}:peerKeys.signing}},encounterAuthorization:{groupReference},triageRouting:{professionalGroupReference:groupReference,escalationGroupReference:`Group/${safe.demoOrganizationUuids.animalCare}`},fetchImpl,pollOptions:{intervalMs:0,timeoutMs:1000},now:()=>new Date(clock)}
  const input={ownerId,profileId,profileSessionToken:token,verifiedContact:contact,idToken:'synthetic-host-verified-token'}
  return {vault,sealer,profile,session,enrollment,authorization,task,state,options,input,client,peer,peerContext,clientSigning}
 }
@@ -129,4 +129,35 @@ test('rechecks current profile/PIN and Consent after asynchronous request/respon
 test('does not admit arbitrary route/resource/action fields or _delete under the fixed triage command',async()=>{
  const Client=need()
  for(const command of [{taskReference:`Task/${taskId}`,action:'_delete'},{taskReference:`Task/${taskId}`,action:'acknowledge',path:'/arbitrary',resourceType:'Group'},{taskReference:'Task/../Group/foreign',action:'acknowledge'}]){const s=await fixture();await assert.rejects(()=>new Client(s.options).transitionEmergencyTriageTask(s.input,command));assert.equal(s.state.requests.length,0)}
+})
+
+test('admits the operational Encounter Consent independently of the distinct department triage queue',async()=>{
+ const Client=need(),s=await fixture(),workflowGroupReference=`Group/${Kind.EncounterOperations}-synthetic-operational-group`
+ assert.notEqual(workflowGroupReference,groupReference)
+ await s.vault.put(collections.workflowAuthorizations,{...s.authorization,groupReference:workflowGroupReference})
+ const options={...s.options,encounterAuthorization:{groupReference:workflowGroupReference}},client=new Client(options)
+ const rows=await client.listEmergencyTriageTasks(s.input)
+ assert.equal(rows[0].entry.claims[T.Owner],groupReference)
+ const result=await client.transitionEmergencyTriageTask(s.input,{taskReference:`Task/${taskId}`,action:'acknowledge'})
+ assert.equal(result.entry.claims[T.Owner],`PractitionerRole/${clinicalId}`)
+ assert.equal(s.state.mutations.length,1)
+})
+
+test('does not substitute the department queue for the separately configured operational Consent group',async()=>{
+ const Client=need(),s=await fixture(),workflowGroupReference=`Group/${Kind.EncounterOperations}-synthetic-operational-group`
+ const client=new Client({...s.options,encounterAuthorization:{groupReference:workflowGroupReference}})
+ // The stored record still names the queue group, not the admitted operational group.
+ await assert.rejects(()=>client.listEmergencyTriageTasks(s.input))
+ assert.equal(s.state.requests.length,0)
+ assert.equal(s.state.mutations.length,0)
+})
+
+test('does not treat the operational Consent group as a department Task owner after valid independent admission',async()=>{
+ const Client=need(),s=await fixture(),workflowGroupReference=`Group/${Kind.EncounterOperations}-synthetic-operational-group`
+ await s.vault.put(collections.workflowAuthorizations,{...s.authorization,groupReference:workflowGroupReference})
+ s.task.meta.claims[T.Owner]=workflowGroupReference
+ const client=new Client({...s.options,encounterAuthorization:{groupReference:workflowGroupReference}})
+ await assert.rejects(()=>client.transitionEmergencyTriageTask(s.input,{taskReference:`Task/${taskId}`,action:'acknowledge'}))
+ assert.ok(s.state.requests.some(row=>row.path===prefix+'/_search'),'valid operational admission must reach the authoritative Task read')
+ assert.equal(s.state.mutations.length,0)
 })

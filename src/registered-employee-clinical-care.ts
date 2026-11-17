@@ -29,6 +29,8 @@ export type RegisteredEmployeeClinicalCareOptions=Readonly<{
   resolveRecipientJwk:(did:string)=>Promise<Readonly<Record<string,unknown>>>
   resolveGatewaySigningJwk:(did:string)=>Promise<PublicJwk>
  }>
+ /** Expected operational workflow group from trusted host policy, separate from Task routing. */
+ encounterAuthorization:Readonly<{groupReference:string}>
  /** Trusted host routing; no browser-provided group or escalation target. */
  triageRouting:Readonly<{professionalGroupReference:string;escalationGroupReference?:string}>
  fetchImpl?:typeof fetch;pollOptions?:PollOptions;now?:()=>Date
@@ -64,8 +66,9 @@ export class RegisteredEmployeeClinicalCareClient{
   if(!text(gateway.providerDid).startsWith('did:web:')||gateway.responseIssuer!==gateway.providerDid)throw denied('gateway_binding_invalid')
   if(typeof gateway.resolveRecipientJwk!=='function'||typeof gateway.resolveGatewaySigningJwk!=='function')throw denied('gateway_binding_invalid')
   reference(options.triageRouting.professionalGroupReference,'Group')
+  const encounterGroupReference=reference(options.encounterAuthorization?.groupReference,'Group')
   if(options.triageRouting.escalationGroupReference!==undefined)reference(options.triageRouting.escalationGroupReference,'Group')
-  this.#options=Object.freeze({...options,collections:Object.freeze({...options.collections}),gateway:Object.freeze({...gateway,baseUrl:url.href.replace(/\/+$/u,'')}),triageRouting:Object.freeze({...options.triageRouting}),pollOptions:Object.freeze({...options.pollOptions})})
+  this.#options=Object.freeze({...options,collections:Object.freeze({...options.collections}),gateway:Object.freeze({...gateway,baseUrl:url.href.replace(/\/+$/u,'')}),encounterAuthorization:Object.freeze({groupReference:encounterGroupReference}),triageRouting:Object.freeze({...options.triageRouting}),pollOptions:Object.freeze({...options.pollOptions})})
  }
  #now(){const date=this.#options.now?.()??new Date();if(!(date instanceof Date)||!Number.isFinite(date.getTime()))throw denied('clock_invalid');return date}
  #input(value:RegisteredEmployeeClinicalCareInput){
@@ -91,7 +94,7 @@ export class RegisteredEmployeeClinicalCareClient{
    const grantId=(identity:string)=>createHash('sha256').update(identity).update('\0').update(Kind.EncounterOperations).digest('base64url')
    const rawAuthorization=await port.get<Row&{id:string}>(names.workflowAuthorizations,grantId(input.profileId))??await port.get<Row&{id:string}>(names.workflowAuthorizations,grantId(responder))
    const authorization=own(json(rawAuthorization))
-   if(authorization.providerDid!==profile.providerDid||authorization.profileId!==undefined&&authorization.profileId!==input.profileId||authorization.status!=='active'||authorization.groupKind!==Kind.EncounterOperations||authorization.organizationReference!==`Organization/${route.tenantId}`||authorization.memberPractitionerRoleReference!==responder||authorization.groupReference!==options.triageRouting.professionalGroupReference||!Array.isArray(authorization.capabilities)||!authorization.capabilities.includes(Cap.EncounterCruds)||!authorization.capabilities.includes(Cap.EncounterHistoryCruds))throw denied('current_encounter_consent_required')
+   if(authorization.providerDid!==profile.providerDid||authorization.profileId!==undefined&&authorization.profileId!==input.profileId||authorization.status!=='active'||authorization.groupKind!==Kind.EncounterOperations||authorization.organizationReference!==`Organization/${route.tenantId}`||authorization.memberPractitionerRoleReference!==responder||authorization.groupReference!==options.encounterAuthorization.groupReference||!Array.isArray(authorization.capabilities)||!authorization.capabilities.includes(Cap.EncounterCruds)||!authorization.capabilities.includes(Cap.EncounterHistoryCruds))throw denied('current_encounter_consent_required')
    text(authorization.consentId);reference(authorization.groupReference,'Group')
    const enrollments=(await port.query<Row&{id:string}>(names.enrollmentGrants,{where:[{attribute:'employeeDid',equals:text(profile.actorDid)}]})).map(value=>own(json(value))).sort((a,b)=>text(a.id).localeCompare(text(b.id)))
    return {profile,session,enrollments,authorization,responder,route}
