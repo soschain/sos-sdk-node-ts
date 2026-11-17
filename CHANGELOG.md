@@ -19,6 +19,14 @@
   conflicts. GW remains authoritative for clinical permissions and licences;
   this client does not expose a general transport or migrate other care flows.
 
+### Planned 0.5.5 cohort (unpublished)
+
+- Validate the accumulated runtime contracts with the private Antifraud Data
+  0.3.4, SOS Data 0.8.3, SOS Core 0.7.2 and FHIR Data 0.7.2 cohort: compile,
+  all 408 native tests and typed controls pass. Keep the owner manifest and
+  lockfile on the matching public cohort until upstream publication permits
+  normal release alignment. The private 0.5.5 archive is not a registry release.
+
 - Add the shared Madrid public dental-registry reader and authenticated read-only
   HTTP composition for all portal modes. Bound downloads, coalesce daily source
   reads, reject conflicting registrations and keep NIF indexes server-side.
