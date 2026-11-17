@@ -2,6 +2,11 @@
 
 ## 0.6.0
 
+- Accept governed research and emergency ISCO-08 occupations in workforce
+  provisioning and recipient enrollment, using the shared classification
+  catalogue. Preserve current contact, role, device and licence bindings;
+  unknown codes and unrelated namespaces remain invalid.
+
 - Include the owned public KEM reply key in the protected transport header and
   bind its existing thumbprint in the inner signed header. Preserve key
   derivation and custody while allowing the gateway to validate the intended
