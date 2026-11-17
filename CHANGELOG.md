@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add a purpose-fixed registered employee Task triage client. Reopen current
+  PIN/DCR-bound custody, require independent active Encounter Consent, and
+  bind clinical creator, group and both Encounter capabilities. Keep Task
+  search and conditional updates claims-first; verify signed/encrypted GW
+  issuer, audience and thread, and reject asynchronous revocation or version
+  conflicts. GW remains authoritative for clinical permissions and licences;
+  this client does not expose a general transport or migrate other care flows.
+
 - Add the shared Madrid public dental-registry reader and authenticated read-only
   HTTP composition for all portal modes. Bound downloads, coalesce daily source
   reads, reject conflicting registrations and keep NIF indexes server-side.
