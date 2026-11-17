@@ -161,3 +161,25 @@ test('does not treat the operational Consent group as a department Task owner af
  assert.ok(s.state.requests.some(row=>row.path===prefix+'/_search'),'valid operational admission must reach the authoritative Task read')
  assert.equal(s.state.mutations.length,0)
 })
+
+for(const [fault,expectedStatus] of [['foreign-profile',403],['empty-pin',401],['missing-creator',403],['foreign-grant-profile',403],['deleted-grant',403],['malformed-profile',400]]){
+ test(`owned denial boundary: ${fault} is classified without any GW request`,async()=>{
+  const Client=need(),s=await fixture(),input={...s.input}
+  if(fault==='foreign-profile')input.profileId=safe.demoOrganizationUuids.publicHealth
+  if(fault==='malformed-profile')input.profileId=42
+  if(fault==='empty-pin')input.profileSessionToken=''
+  if(fault==='missing-creator'){const profile={...s.profile};delete profile.clinicalCreatorBinding;await s.vault.put(collections.profiles,profile)}
+  if(fault==='foreign-grant-profile')await s.vault.put(collections.workflowAuthorizations,{...s.authorization,profileId:safe.demoOrganizationUuids.publicHealth})
+  if(fault==='deleted-grant')await s.vault.delete(collections.workflowAuthorizations,s.authorization.id)
+  await assert.rejects(()=>new Client(s.options).listEmergencyTriageTasks(input),error=>error instanceof api.RegisteredEmployeeClinicalCareDeniedError&&error.status===expectedStatus)
+  assert.equal(s.state.requests.length,0)
+  assert.equal(s.state.mutations.length,0)
+ })
+}
+
+test('retains an operational host key outage rather than misclassifying it as local authority denial',async()=>{
+ const Client=need(),s=await fixture(),outage=new Error('synthetic_host_key_service_unavailable')
+ const client=new Client({...s.options,sealer:{seal:s.sealer.seal.bind(s.sealer),unseal:async()=>{throw outage}}})
+ await assert.rejects(()=>client.listEmergencyTriageTasks(s.input),error=>error===outage)
+ assert.equal(s.state.requests.length,0)
+})

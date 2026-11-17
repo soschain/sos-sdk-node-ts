@@ -102,7 +102,7 @@ export class RegisteredProfileAccess{
   const view=structuredClone(publicProfile)
   return Object.freeze({...view,allowedSubjectDids:Object.freeze([...view.allowedSubjectDids])})
  }
- async listProfiles(input:Pick<RegisteredProfileBinding,'ownerId'|'providerDid'|'routeContext'>){
+ async listProfiles(input:Pick<RegisteredProfileBinding,'ownerId'|'providerDid'|'routeContext'>):Promise<Omit<RegisteredProfileView,'publicJwks'|'storagePublicJwk'>[]>{
   this.route(input);text(input.ownerId)
   const rows=await this.options.vault.query<Profile>(this.options.collections.profiles,{where:[{attribute:'ownerId',equals:input.ownerId},{attribute:'providerDid',equals:input.providerDid}]})
   return rows.flatMap(profile=>{

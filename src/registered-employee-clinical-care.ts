@@ -12,10 +12,10 @@ import {extractBundleSearchResources} from 'sos-sdk-core-ts/gateway-response-rea
 import {readEmergencyTriageTask,transitionEmergencyTriageTask,type EmergencyTriageAction} from 'sos-sdk-core-ts/care-emergency-alert-orchestration'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 import type {IVaultRepository} from 'sos-sdk-core-ts/vault-repository'
-import {resolveRegisteredEmployeeDraftRequester} from './registered-employee-draft-requester.js'
+import {resolveRegisteredEmployeeDraftRequester,RegisteredEmployeeDraftRequesterDeniedError} from './registered-employee-draft-requester.js'
 import {openRegisteredCommunicationWallet} from './registered-communication-wallet.js'
 import {RegisteredGatewayTransport,createVerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
-import {own,text,pick,json,fingerprint,profileFields,sessionFields} from './stored-profile-state.js'
+import {own,text,pick,json,fingerprint,profileFields,sessionFields,StoredProfileStateInvalidError} from './stored-profile-state.js'
 
 type Row=Record<string,unknown>
 export type RegisteredEmployeeClinicalCareInput=Readonly<{
@@ -72,13 +72,20 @@ export class RegisteredEmployeeClinicalCareClient{
  }
  #now(){const date=this.#options.now?.()??new Date();if(!(date instanceof Date)||!Number.isFinite(date.getTime()))throw denied('clock_invalid');return date}
  #input(value:RegisteredEmployeeClinicalCareInput){
+  try{
   const raw=fields(value,['ownerId','profileId','profileSessionToken','verifiedContact','idToken'])
+  if(typeof raw.profileSessionToken!=='string'||!raw.profileSessionToken.trim())throw denied('wallet_session_required',401)
   const ownerId=text(raw.ownerId),profileId=text(raw.profileId),profileSessionToken=text(raw.profileSessionToken),idToken=text(raw.idToken,65536)
   if(/[\/\\]/u.test(profileId)||!/^[A-Za-z0-9_-]{43}$/u.test(profileSessionToken)||Buffer.from(profileSessionToken,'base64url').toString('base64url')!==profileSessionToken)throw denied()
   const contact=fields(raw.verifiedContact,['contactKind','contact']);if(contact.contactKind!=='phone'&&contact.contactKind!=='email')throw denied()
   return {ownerId,profileId,profileSessionToken,idToken,verifiedContact:{contactKind:contact.contactKind,contact:text(contact.contact)} as ActorContactInput}
+  }catch(error){
+   if(error instanceof StoredProfileStateInvalidError)throw denied('input_invalid',400)
+   throw error
+  }
  }
  async #open(value:RegisteredEmployeeClinicalCareInput):Promise<OpenedClinicalCare>{
+  try{
   const input=this.#input(value),options=this.#options,names=options.collections,sessionId=createHash('sha256').update(input.profileSessionToken).digest('hex')
   const capture=async(port:IVaultRepository):Promise<Snapshot>=>{
    const rawProfile=await port.get<Row&{id:string}>(names.profiles,input.profileId)
@@ -117,6 +124,10 @@ export class RegisteredEmployeeClinicalCareClient{
    const result=await transport.exchange(path(action),payload,options.gateway.responseIssuer,options.pollOptions);await guard();return result.poll.body
   }
   return {before,exchange,guard}
+  }catch(error){
+   if(error instanceof StoredProfileStateInvalidError||error instanceof RegisteredEmployeeDraftRequesterDeniedError)throw denied()
+   throw error
+  }
  }
  #tasks(body:unknown):readonly RegisteredEmployeeClinicalTask[]{
   const rows=extractBundleSearchResources(body),result:RegisteredEmployeeClinicalTask[]=[],seen=new Set<string>()

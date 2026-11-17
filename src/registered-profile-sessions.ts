@@ -116,7 +116,7 @@ export class RegisteredProfileSessions{
   for(const key of profile.publicJwks){const kid=match(key);if(kids.has(kid))throw denied();kids.add(kid)}
   if(profile.storagePublicJwk!==undefined)match(profile.storagePublicJwk,true)
  }
- async unlock(input:RegisteredProfileBinding&Readonly<{pin:string}>){
+ async unlock(input:RegisteredProfileBinding&Readonly<{pin:string}>):Promise<{profile:Omit<StoredProfile,'lockedUntil'>;session:StoredSession;custody:Awaited<ReturnType<typeof openServerProfileCustodyKeys>>}>{
   const before=await this.profile(input);this.assertUnlocked(before)
   let seed:string,vp:string|undefined
   try{
@@ -178,7 +178,7 @@ export class RegisteredProfileSessions{
   })
  }
  /** Host must authorize recovery/passkey custody first. Preparation grants no transport or signing capability. */
- async preparePinReplacement(input:RegisteredProfileBinding&Readonly<{authorizedWalletSeed:string;authorizedVpToken?:string;newPin:string}>){
+ async preparePinReplacement(input:RegisteredProfileBinding&Readonly<{authorizedWalletSeed:string;authorizedVpToken?:string;newPin:string}>):Promise<Readonly<{commit:(port:IVaultRepository)=>Promise<Omit<StoredProfile,'lockedUntil'>>}>>{
   const captured=Object.freeze({...input,routeContext:Object.freeze({...input.routeContext})})
   const binding=Object.freeze({ownerId:captured.ownerId,profileId:captured.profileId,actorDid:captured.actorDid,providerDid:captured.providerDid,routeContext:captured.routeContext})
   const before=await this.profile(binding)
@@ -199,7 +199,7 @@ export class RegisteredProfileSessions{
   return Object.freeze({commit})
  }
  /** Existing standalone path delegates to the same prepared transaction operation. */
- async replacePin(input:RegisteredProfileBinding&Readonly<{authorizedWalletSeed:string;authorizedVpToken?:string;newPin:string}>){
+ async replacePin(input:RegisteredProfileBinding&Readonly<{authorizedWalletSeed:string;authorizedVpToken?:string;newPin:string}>):Promise<Omit<StoredProfile,'lockedUntil'>>{
   const prepared=await this.preparePinReplacement(input)
   return this.options.vault.runTransaction(prepared.commit)
  }

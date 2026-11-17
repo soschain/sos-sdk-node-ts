@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Classify malformed clinical inputs and missing current custody/Consent evidence
+  as owned admission denials while preserving operational key/storage failures.
+  Keep registered profile/session return declarations portable across coherent
+  Antifraud dependency versions without changing their emitted JavaScript.
+
 - Bind the operational Encounter Consent group independently of the
   department triage queue. Require its explicit trusted-host reference;
   neither group may substitute for the other during admission or Task updates.
