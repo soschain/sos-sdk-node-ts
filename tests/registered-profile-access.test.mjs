@@ -3,6 +3,11 @@ import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import {createHash,createPublicKey,generateKeyPairSync,randomBytes,randomUUID,sign,verify} from 'node:crypto'
 import test from 'node:test'
+import {ActorKinds} from 'antifraud-data-utils-ts/actor-kinds'
+import {buildIndividualMemberIdentityVpPayload,getMatchingIndividualMemberCredentialFromVpToken} from 'sos-data-utils-ts/individual-smart'
+import {IndividualMemberRelationshipCodes} from 'sos-data-utils-ts/individual-access-role-profile'
+import {buildMemberDidWeb} from 'sos-data-utils-ts/activation-policy'
+import {openServerProfileCustodyKeys} from '../dist/server-profile-custody-keys.js'
 import {CryptographyService} from 'antifraud-data-utils-ts/cryptography'
 import {encodeMultibaseSha3} from 'antifraud-data-utils-ts/encoding'
 import {HL7_CODING_SYSTEM_V3_ROLE_CODE} from 'fhir-data-utils-ts'
@@ -35,11 +40,21 @@ const canonicalCrud=buildScopeSmartCompositionAccess({subjectDid:patient,accessV
 const baseUrl=safe.httpsBaseUrl,smartPath=`/${route.tenantId}/cds-${route.jurisdiction}/v1/${route.sector}/identity/openid/smart/token`
 const accountToken='synthetic-host-verified-account-token'
 
-async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg}={}){
+const defaultBinding=binding
+async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg,member=false,memberVp=true}={}){
+ const memberRelationship=IndividualMemberRelationshipCodes[0]
+ const actorDid=member?buildMemberDidWeb(patient,safe.demoOrganizationUuids.healthCare,memberRelationship):defaultBinding.actorDid
+ const binding={...defaultBinding,actorDid}
  const vault=new TransactionalMemoryVaultRepository(),sealer=createAesGcmProfileSealer(Buffer.alloc(32,19))
  const publicJwks=oracle.descriptors.filter(d=>d.purpose!=='document-at-rest').map(d=>structuredClone(d.publicJwk))
  const storagePublicJwk=structuredClone(oracle.descriptors.find(d=>d.purpose==='document-at-rest').publicJwk)
- const profile={id:binding.profileId,...binding,actorKind:'individual_controller',actorMode:'controller',profileDid:actorDid,allowedSubjectDids:[],clientId,deviceDid:`${actorDid}:device`,publicJwks,storagePublicJwk,protectedWalletSeed:await protectServerProfileSecret(seed.walletSeed,pin,`${binding.profileId}:wallet-seed`,sealer,{cost:1024}),failedUnlocks:0,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z'}
+ const profile={id:binding.profileId,...binding,actorKind:member?ActorKinds.IndividualMember:ActorKinds.IndividualController,actorMode:member?'member':'controller',profileDid:actorDid,allowedSubjectDids:[],clientId,deviceDid:`${actorDid}:device`,publicJwks,storagePublicJwk,protectedWalletSeed:await protectServerProfileSecret(seed.walletSeed,pin,`${binding.profileId}:wallet-seed`,sealer,{cost:1024}),failedUnlocks:0,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z'}
+ let memberPresentation
+ if(member&&memberVp){
+  const keys=await openServerProfileCustodyKeys({walletKeyDerivationId:seed.walletKeyDerivationId,unlockedWalletSeed:seed.walletSeed,binding:{kind:'registered',publicJwks,storagePublicJwk}})
+  memberPresentation=await keys.signIdentityPresentationJws({claims:buildIndividualMemberIdentityVpPayload({clientId,actorDid,subjectDid:patient,relationship:memberRelationship,email:safe.firstContactEmail,additionalPayload:{iss:actorDid,sub:actorDid,aud:providerDid,iat:1794614400,exp:1794614700}})})
+  profile.protectedVpToken=await protectServerProfileSecret(memberPresentation,pin,`${binding.profileId}:vp-token`,sealer,{cost:1024})
+ }
  await vault.put(profiles,profile)
  const clientSigning=oracle.descriptors.find(d=>d.purpose==='comm-signing').publicJwk
  const clientEncryption=oracle.descriptors.find(d=>d.purpose==='comm-encryption').publicJwk
@@ -84,7 +99,15 @@ async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg}={}){
    const request=job.message.body
    assert.equal(job.message.aud,`${baseUrl}${smartPath}`)
    assert.equal(request.client_id,clientId);assert.equal(request.sub,actorDid)
-   assert.equal(request.id_token,accountToken);assert.equal('vp_token' in request,false)
+   assert.equal(request.id_token,accountToken)
+   if(member){
+    if(request.vp_token!==memberPresentation||fault==='member-consent-denied')return new Response('{}',{status:403})
+    assert.equal(request.vp_token,memberPresentation,'forward the original protected presentation without replacing or minting it')
+    const parts=request.vp_token.split('.'),vpKey=oracle.descriptors.find(key=>key.purpose==='vp-token-signing').publicJwk
+    assert.equal(verify('sha384',Buffer.from(`${parts[0]}.${parts[1]}`),{key:createPublicKey({key:vpKey,format:'jwk'}),dsaEncoding:'ieee-p1363'},Buffer.from(parts[2],'base64url')),true)
+    const relationship=getMatchingIndividualMemberCredentialFromVpToken(request.vp_token,{actorDid,subjectDid:patient,relationship:memberRelationship})
+    assert.ok(relationship)
+   }else assert.equal('vp_token' in request,false)
    assert.equal(request.client_assertion_type,'private_key_jwt')
    assert.equal(request.acr_values,'urn:antifraud:acr:openid4vp:individual')
    assert.equal(request.purpose,'TREAT')
@@ -114,7 +137,7 @@ async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg}={}){
   else{
    assert.equal(job.message.aud,providerDid)
    assert.equal(job.message.body.data[0].resource.meta.claims['org.schema.Organization.owner.email'],safe.firstContactEmail)
-   const owned={resource:{resourceType:'Organization',id:safe.resourceUuid,meta:{claims:{'org.schema.Organization.sameAs':alias,'org.schema.Organization.did':patient,'org.schema.Organization.owner.email':safe.firstContactEmail,'org.schema.Organization.owner.identifier.value':`urn:uuid:${safe.resourceUuid}`,'org.schema.Organization.member.role':'RESPRSN'}}}}
+   const owned={resource:{resourceType:'Organization',id:safe.resourceUuid,meta:{claims:{'org.schema.Organization.sameAs':alias,'org.schema.Organization.did':patient,'org.schema.Organization.owner.email':safe.firstContactEmail,'org.schema.Organization.owner.identifier.value':`urn:uuid:${safe.resourceUuid}`,'org.schema.Organization.member.role':member?memberRelationship:'RESPRSN'}}}}
    const entries=[owned]
    if(fault==='ambiguous-directory'||fault==='repeated-directory'){
     const repeated=structuredClone(owned)
@@ -145,14 +168,50 @@ async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg}={}){
   if(fault==='smart-private-key')return {...ec.privateKey.export({format:'jwk'}),alg:smartAlg,use:'sig',kid:ecPublic.kid}
   return ecPublic
  }}},fetchImpl,pollOptions:{intervalMs:0,timeoutMs:2000}}
- return {vault,sealer,profile,options,state,readClient:async packed=>{
+ return {vault,sealer,profile,options,state,binding,memberPresentation,readClient:async packed=>{
   const opened=await peer.unpackWithContext(packed,{context:peerContext})
   assert.equal(await crypto.verifyJws(opened.meta.jws.compact,clientSigning),true)
   return opened.content
  },reply:message=>peer.packForRecipientWithContext(message,actorDid,{context:peerContext})}
 }
-async function begin(t,options){const f=await fixture(t,options),{RegisteredProfileAccess}=await load(),access=new RegisteredProfileAccess(f.options);const actor=await access.unlockActorProfile({...binding,pin});return {...f,access,sessionId:actor.sessionId}}
+async function begin(t,options){const f=await fixture(t,options),{RegisteredProfileAccess}=await load(),access=new RegisteredProfileAccess(f.options);const actor=await access.unlockActorProfile({...f.binding,pin});return {...f,access,sessionId:actor.sessionId}}
 const request=(sessionId)=>({...binding,sessionId,idToken:accountToken})
+
+test('opens an existing individual member profile and forwards its protected signed presentation for scoped SMART access',async t=>{
+ const f=await begin(t,{member:true,smartAlg:'ES384'}),auth={...f.binding,sessionId:f.sessionId,idToken:accountToken}
+ const before=await f.vault.get(profiles,f.binding.profileId)
+ const listed=await f.access.listProfiles({ownerId:f.binding.ownerId,providerDid,routeContext:route})
+ assert.equal(listed.length,1);assert.equal(listed[0].actorKind,ActorKinds.IndividualMember);assert.equal(listed[0].actorMode,'member')
+ await f.access.refreshAuthorizedSubjects({...auth,verifiedContact:{email:safe.firstContactEmail}})
+ const selected=await f.access.selectAuthorizedSubject({...auth,subjectDid:alias,scopes:[requestedScope]})
+ assert.equal(selected.actorMode,'member');assert.equal(selected.profile.actorMode,'member')
+ assert.deepEqual(selected.scopes,[canonicalScope])
+ assert.equal(f.state.requests.find(row=>row.path===smartPath).message.body.vp_token,f.memberPresentation)
+ const after=await f.vault.get(profiles,f.binding.profileId)
+ assert.deepEqual(after.protectedVpToken,before.protectedVpToken)
+ assert.deepEqual(after.publicJwks,before.publicJwks)
+ assert.equal('protectedVpToken' in selected.profile,false)
+ assert.equal('memberPresentation' in selected,false)
+})
+test('an existing member without its protected VP is rejected before network or session creation',async t=>{
+ const f=await fixture(t,{member:true,memberVp:false}),{RegisteredProfileAccess}=await load(),access=new RegisteredProfileAccess(f.options)
+ await assert.rejects(access.unlockActorProfile({...f.binding,pin}))
+ assert.equal((await f.vault.query(sessions,{})).length,0)
+ assert.equal(f.state.requests.length,0)
+})
+test('member SMART requires its opened VP and a current positive gateway authorization',async t=>{
+ for(const fault of ['missing-session-vp','member-consent-denied']){
+  const f=await begin(t,{member:true}),auth={...f.binding,sessionId:f.sessionId,idToken:accountToken}
+  await f.access.refreshAuthorizedSubjects({...auth,verifiedContact:{email:safe.firstContactEmail}})
+  if(fault==='missing-session-vp'){
+   const session=await f.vault.get(sessions,f.sessionId);delete session.sealedUnlockedVpToken;await f.vault.put(sessions,session)
+  }else f.state.setFault(fault)
+  const before=f.state.requests.length
+  await assert.rejects(f.access.selectAuthorizedSubject({...auth,subjectDid:alias,scopes:[requestedScope]}))
+  assert.equal((await f.vault.get(sessions,f.sessionId)).sealedAccessToken,undefined)
+  if(fault==='missing-session-vp')assert.equal(f.state.requests.length,before)
+ }
+})
 
 test('readAuthorizedSubjects accepts signed current directory rows without changing selected SMART context or profile metadata',async t=>{
  const f=await begin(t)

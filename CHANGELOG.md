@@ -2,6 +2,11 @@
 
 ## 0.6.0
 
+- Preserve access for existing individual-member profiles carrying their own
+  protected presentation. Reopen and forward that exact presentation for
+  gateway verification, retaining member scope and current consent checks;
+  do not issue a credential, register another device or infer controller rights.
+
 - Correlate SMART issuance through the signed response's request identifier
   and thread while validating the JWT's independent token identifier. Preserve
   pinned keys, signatures, issuer, audience, actor, time and scope checks.

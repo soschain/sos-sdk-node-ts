@@ -96,3 +96,11 @@ These are source references only; this package imports no historical runtime.
 The separate SMART signature profile follows the current
 [gateway token issuer](https://github.com/soschain/sos-gw-node-ts/blob/main/src/managers/OpenIdAuthManager.ts)
 and its [published DID relationships](https://github.com/soschain/sos-gw-node-ts/blob/main/src/utils/did-backend.ts).
+
+Existing `individual_member` profiles with `actorMode: 'member'` retain their
+protected presentation and registered custody. PIN unlock seals that same
+presentation into the host session. SMART selection forwards it unchanged for
+the gateway's credential, relationship and current-consent verification; an
+absent presentation or denied gateway response grants no access. This reads
+existing member state only: it does not issue a member credential, enroll a new
+member or treat a member as a controller.
