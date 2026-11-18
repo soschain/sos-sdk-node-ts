@@ -27,6 +27,8 @@
   derivation and custody while allowing the gateway to validate the intended
   encrypted response recipient before device registration.
 
+## 0.5.5
+
 - Classify malformed clinical inputs and missing current custody/Consent evidence
   as owned admission denials while preserving operational key/storage failures.
   Keep registered profile/session return declarations portable across coherent
@@ -44,21 +46,20 @@
   conflicts. GW remains authoritative for clinical permissions and licences;
   this client does not expose a general transport or migrate other care flows.
 
-### Planned 0.5.5 cohort (unpublished)
-
-- Validate the accumulated runtime contracts with the private Antifraud Data
-  0.3.4, SOS Data 0.8.3, SOS Core 0.7.2 and FHIR Data 0.7.2 cohort: compile,
-  all 408 native tests and typed controls pass. Keep the owner manifest and
-  lockfile on the matching public cohort until upstream publication permits
-  normal release alignment. The private 0.5.5 archive is not a registry release.
+- Align the accumulated runtime contracts with Antifraud Data 0.3.4, SOS Data
+  0.8.3, SOS Core 0.7.2 and FHIR Data 0.7.2. The matching private cohort passed
+  compilation, all 408 native tests and typed controls; the Professional host
+  also passed six actual installed-SDK protocol cases and sixteen route-boundary
+  cases. Registry installation and release verification are recorded separately.
+  A fresh exact registry installation preserves all 110 compiled output files
+  from that validated candidate and passes strict compilation and package
+  boundary checks without changing unrelated locked dependencies.
 
 - Add the shared Madrid public dental-registry reader and authenticated read-only
   HTTP composition for all portal modes. Bound downloads, coalesce daily source
   reads, reject conflicting registrations and keep NIF indexes server-side.
   Unlabelled source X/Y values are not treated as GPS; radius searches require
-  explicit reviewed WGS84 enrichment. On 2026-11-17, the complete Node 26.13.0
-  SDK build and all 387 tests passed with immutable local Antifraud/SOS Data
-  packages. A compatible exact public-registry release cohort is still pending.
+  explicit reviewed WGS84 enrichment.
 
 - Resolve the public requester of a draft permission proposal from current
   PIN-sealed custody and the exact completed employee-enrollment record.
