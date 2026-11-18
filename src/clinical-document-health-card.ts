@@ -121,16 +121,27 @@ function authorized(value:AuthorizedClinicalDocument|undefined,reference:string,
   return structuredClone(value)
 }
 /** Issues only a caller-independent authorized stored document. Standard minimization operates on a copy; native clinical source remains intact. */
-export function createClinicalDocumentHealthCardIssuer(options:Readonly<{documents:AuthorizedClinicalDocumentPort;keys:OrganizationClinicalDocumentKeyVault;issuers:readonly ClinicalDocumentIssuer[];nowSeconds?:()=>number}>):ClinicalDocumentHealthCardIssuer {
+type OrganizationClinicalDocumentIssuerOptions=Readonly<{documents:AuthorizedClinicalDocumentPort;keys:OrganizationClinicalDocumentKeyVault;issuers:readonly ClinicalDocumentIssuer[];nowSeconds?:()=>number}>
+export function createClinicalDocumentHealthCardIssuer(options:OrganizationClinicalDocumentIssuerOptions):ClinicalDocumentHealthCardIssuer {
+  return clinicalDocumentIssuer(options)
+}
+/** Explicit Demo composition only. The signing realm identifies the demonstration
+ * signer, not the clinical organization. Hosts retain its custody/public keys
+ * outside resettable data and must not trust this realm in network modes. */
+export function createDemoClinicalDocumentHealthCardIssuer(options:Omit<OrganizationClinicalDocumentIssuerOptions,'issuers'>&Readonly<{signingRealm:ClinicalDocumentIssuer}>):ClinicalDocumentHealthCardIssuer {
+  const realm=issuerList([options.signingRealm])[0]!
+  return clinicalDocumentIssuer({...options,issuers:[realm]},realm)
+}
+function clinicalDocumentIssuer(options:OrganizationClinicalDocumentIssuerOptions,signingRealm?:ClinicalDocumentIssuer):ClinicalDocumentHealthCardIssuer {
   const issuers=issuerList(options.issuers),keys=custody.get(options.keys),clock=options.nowSeconds??(()=>Math.floor(Date.now()/1000))
   if(!keys)fail('key_invalid')
   return Object.freeze({
     async issue(command:ClinicalDocumentHealthCardCommand){
       if(!record(command)||Object.keys(command).some(k=>!['operationId','documentReference','expectedRevision'].includes(k))||!text(command.operationId)||!text(command.documentReference)||!text(command.expectedRevision))fail('command_invalid')
       const read=async()=>authorized(await options.documents.readAuthorizedDocument({documentReference:command.documentReference}),command.documentReference,command.expectedRevision)
-      const source=await read(),config=issuers.find(i=>i.organizationReference===source.organizationReference)
+      const source=await read(),config=signingRealm??issuers.find(i=>i.organizationReference===source.organizationReference)
       if(!config)fail('issuer_untrusted')
-      const row=await keys.load(source.organizationReference)
+      const row=await keys.load(config.organizationReference)
       if(canonical(await read())!==canonical(source))fail('authorization_denied')
       const prepared=prepareSmartHealthCard({issuer:config.issuer,notBefore:clock(),kid:row.publicJwk.kid,fhirVersion:source.fhirVersion,fhirBundle:source.bundle})
       const compactJws=assembleSmartHealthCardJws(prepared,await keys.sign(row,prepared.signingBytes))

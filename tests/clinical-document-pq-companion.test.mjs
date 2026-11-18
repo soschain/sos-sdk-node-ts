@@ -27,6 +27,27 @@ function fixture(){
 }
 const code=expected=>error=>error?.code===expected
 async function combinedJwks(f){return{keys:[...(await f.service.publicJwks(issuer)).keys,...(await f.service.publicProofJwks(issuer)).keys]}}
+
+test('explicit Demo realm retains both independent signing keys after organization reset and provider reconstruction',async()=>{
+ assert.equal(typeof sdk.createDemoClinicalDocumentCompanionIssuer,'function')
+ const f=fixture(),realm={organizationReference:'Organization/synthetic-demo-signing-realm',issuer:safe.httpsBaseUrl+'/demo-clinical-issuer'}
+ const options={documents:f.documents,keys:f.keys,proofKeys:f.proofKeys,signingRealm:realm,nowSeconds:clock}
+ const service=sdk.createDemoClinicalDocumentCompanionIssuer(options),card=await service.issue(f.command)
+ const jwks={keys:[...(await service.publicJwks(realm.issuer)).keys,...(await service.publicProofJwks(realm.issuer)).keys]}
+ f.state.source=undefined
+ const restarted=sdk.createDemoClinicalDocumentCompanionIssuer({...options,keys:sdk.createOrganizationClinicalDocumentKeyVault({vault:f.vault,sealer:f.sealer,collection:'synthetic-clinical-es-keys'}),proofKeys:sdk.createOrganizationClinicalDocumentProofKeyVault({vault:f.vault,sealer:f.sealer,collection})})
+ assert.deepEqual(await restarted.publicJwks(realm.issuer),{keys:jwks.keys.filter(key=>key.kty==='EC')})
+ assert.deepEqual(await restarted.publicProofJwks(realm.issuer),{keys:jwks.keys.filter(key=>key.kty==='AKP')})
+ const verified=await sdk.verifyClinicalDocumentCompanion({credential:card.qrValues,companion:card.companion.pqcValues,trustedIssuers:[realm],nowSeconds:clock(),fetchImpl:async()=>Response.json(jwks)})
+ assert.equal(verified.status,'verified');assert.equal(verified.organizationReference,realm.organizationReference)
+ await assert.rejects(restarted.issue(f.command),error=>error.code==='clinical_document_shc_authorization_denied')
+ f.state.source=snapshot()
+ const other='Organization/'+safe.demoOrganizationUuids.animalCare
+ f.state.source.organizationReference=other;f.state.source.clinicalCreatorBinding.ownerIdentifier=other;f.state.source.bundle.entry[0].resource.author=[{reference:other}]
+ const next=await restarted.issue(f.command)
+ assert.equal(next.issuer,card.issuer);assert.equal(next.companion.kid,card.companion.kid)
+ assert.equal(JSON.parse(Buffer.from(next.compactJws.split('.')[0],'base64url')).kid,JSON.parse(Buffer.from(card.compactJws.split('.')[0],'base64url')).kid)
+})
 async function verify(f,card,extra={}){const jwks=await combinedJwks(f);return sdk.verifyClinicalDocumentCompanion({credential:card.compactJws,companion:card.companion.detachedJws,trustedIssuers:f.issuers,nowSeconds:clock(),fetchImpl:async url=>{assert.equal(String(url),issuer+'/.well-known/jwks.json');return Response.json(jwks)},...extra})}
 
 test('retained AF native ML-DSA-65 detached crypto and existing pqc numeric transport agree on exact external bytes',async()=>{

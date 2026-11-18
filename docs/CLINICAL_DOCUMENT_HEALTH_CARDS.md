@@ -15,6 +15,34 @@ Call `issue({operationId, documentReference, expectedRevision})`; the result is
 Public lookup never creates custody: a configured organization without an
 authorized issuance returns an empty key set.
 
+## Persistent Demo signer
+
+`createDemoClinicalDocumentHealthCardIssuer` and
+`createDemoClinicalDocumentCompanionIssuer` accept a server-configured
+`signingRealm: {organizationReference, issuer}` in place of `issuers`. The
+realm identifies a shared demonstration signer. It does not replace the
+clinical organization's identity or author inside the signed document. All
+stored-document, licence, membership and permission rechecks still apply.
+
+Keep the realm's key collections, sealing key and HTTPS issuer endpoint outside
+account, organization and Demo generation resets. Reconstructing the provider
+over the same retained vault preserves its independent ES256 key and ML-DSA-65
+seed. A memory vault alone does not preserve keys across a process restart.
+Never expose or embed a common private seed in either portal. Retain previous
+public verification keys and issuer endpoints when migrating or rotating keys,
+so an already printed Demo SHC can still be verified.
+
+The verifier's `organizationReference` identifies the configured signer. For a
+Demo realm that is the demonstration signer, not proof of the clinical
+organization's independent endorsement. Hosts explicitly trust this signer
+only in Demo and keep ordinary per-organization issuers in Test Network and
+production. Public verification needs the retained public keys rather than an
+active clinical document or organization session. It does not restore access
+to a deleted original or authorize issuing a replacement.
+
+These constructors are an SDK capability. Each portal must separately wire
+the stable Demo endpoint, persistent custody and mode-specific trust policy.
+
 `documents.readAuthorizedDocument({documentReference})` is a trusted server
 port, called repeatedly across custody awaits. It must read the actual stored
 document and current authenticated author, organization membership, licence,

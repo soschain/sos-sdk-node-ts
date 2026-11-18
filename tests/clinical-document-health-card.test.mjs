@@ -34,6 +34,50 @@ async function fixture(){
 const code=expected=>error=>error?.code===expected
 async function issue(f){return f.service.issue(f.command)}
 const readPayload=compact=>JSON.parse(inflateRawSync(Buffer.from(compact.split('.')[1],'base64url')).toString('utf8'))
+
+test('explicit Demo signing realm shares its key across authorized organizations without rewriting clinical ownership',async()=>{
+ assert.equal(typeof api.createDemoClinicalDocumentHealthCardIssuer,'function')
+ const f=await fixture(),realm={organizationReference:'Organization/synthetic-demo-signing-realm',issuer:safe.httpsBaseUrl+'/demo-clinical-issuer'}
+ const service=api.createDemoClinicalDocumentHealthCardIssuer({documents:f.documents,keys:f.keys,signingRealm:realm,nowSeconds})
+ const first=await service.issue(f.command),before=JSON.stringify(f.state.current)
+ assert.equal(first.issuer,realm.issuer)
+ assert.equal(JSON.stringify(f.state.current),before)
+ const other='Organization/'+safe.demoOrganizationUuids.animalCare
+ f.state.current.organizationReference=other
+ f.state.current.clinicalCreatorBinding.ownerIdentifier=other
+ f.state.current.bundle.entry[0].resource.author=[{reference:other}]
+ const secondBefore=JSON.stringify(f.state.current),second=await service.issue(f.command)
+ assert.equal(second.issuer,first.issuer)
+ assert.equal(JSON.parse(Buffer.from(first.compactJws.split('.')[0],'base64url')).kid,JSON.parse(Buffer.from(second.compactJws.split('.')[0],'base64url')).kid)
+ assert.equal(JSON.stringify(f.state.current),secondBefore)
+ assert.ok(JSON.stringify(readPayload(second.compactJws)).includes(other))
+})
+
+test('Demo public keys verify a printed credential after document reset and signing-provider reconstruction',async()=>{
+ assert.equal(typeof api.createDemoClinicalDocumentHealthCardIssuer,'function')
+ const f=await fixture(),realm={organizationReference:'Organization/synthetic-demo-signing-realm',issuer:safe.httpsBaseUrl+'/demo-clinical-issuer'}
+ const options={documents:f.documents,keys:f.keys,signingRealm:realm,nowSeconds}
+ const service=api.createDemoClinicalDocumentHealthCardIssuer(options),card=await service.issue(f.command),jwks=await service.publicJwks(realm.issuer)
+ f.state.current=undefined
+ const keys=api.createOrganizationClinicalDocumentKeyVault({vault:f.vault,sealer:f.sealer,collection})
+ const restarted=api.createDemoClinicalDocumentHealthCardIssuer({...options,keys}),reads=f.state.reads
+ assert.deepEqual(await restarted.publicJwks(realm.issuer),jwks)
+ const verified=await api.verifyClinicalDocumentHealthCard({credential:card.qrValues,trustedIssuers:[realm],nowSeconds:nowSeconds(),fetchImpl:async()=>Response.json(jwks)})
+ assert.equal(verified.status,'verified')
+ assert.equal(verified.organizationReference,realm.organizationReference)
+ assert.equal(f.state.reads,reads)
+ await assert.rejects(restarted.issue(f.command),error=>error.code==='clinical_document_shc_authorization_denied')
+})
+
+test('a shared Demo issuer never grants authorship or initializes a public key on an unauthorized read',async()=>{
+ assert.equal(typeof api.createDemoClinicalDocumentHealthCardIssuer,'function')
+ const f=await fixture(),realm={organizationReference:'Organization/synthetic-demo-signing-realm',issuer:safe.httpsBaseUrl+'/demo-clinical-issuer'}
+ const service=api.createDemoClinicalDocumentHealthCardIssuer({documents:f.documents,keys:f.keys,signingRealm:realm,nowSeconds})
+ assert.deepEqual(await service.publicJwks(realm.issuer),{keys:[]})
+ f.state.current.licensedClinicalAuthor=false
+ await assert.rejects(service.issue(f.command),error=>error.code==='clinical_document_shc_authorization_denied')
+ assert.deepEqual(await service.publicJwks(realm.issuer),{keys:[]})
+})
 function signatureValid(compact,jwk){const[h,p,s]=compact.split('.');return verify('sha256',Buffer.from(`${h}.${p}`),{key:createPublicKey({key:jwk,format:'jwk'}),dsaEncoding:'ieee-p1363'},Buffer.from(s,'base64url'))}
 
 test('retained control: actual AES vault envelope and native ES256/P1363 use canonical SHC numeric transport',async()=>{

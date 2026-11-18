@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add explicit Demo signing-realm constructors for ordinary SHCs and the
+  separate post-quantum companion. Share the demonstration signer across
+  authorized clinical organizations while preserving their clinical ownership
+  and all current-author rechecks. Retained custody supports verification after
+  document reset and provider reconstruction; portal integration and durable
+  process-restart acceptance remain separate work.
+
 - Recheck each original document's clinical section within its owning vault
   transaction on save, read and idempotent replay. Keep owner export separate
   from professional authorization. Verify companion proofs over the same

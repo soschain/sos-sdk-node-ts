@@ -1,6 +1,6 @@
 import {createHash,randomBytes,randomUUID} from 'node:crypto'
 import {CryptographyService,encodePostQuantumDetachedProofQr,decodePostQuantumDetachedProofQr,decodePostQuantumDetachedProofUri,type MldsaPublicJwk} from 'antifraud-data-utils-ts/cryptography'
-import {ClinicalDocumentHealthCardError,createClinicalDocumentHealthCardIssuer,verifyClinicalDocumentHealthCard,type AuthorizedClinicalDocument,type AuthorizedClinicalDocumentPort,type ClinicalDocumentHealthCardCommand,type ClinicalDocumentIssuer,type IssuedClinicalDocumentHealthCard,type OrganizationClinicalDocumentKeyVault,type VerifiedClinicalDocumentHealthCard} from './clinical-document-health-card.js'
+import {ClinicalDocumentHealthCardError,createClinicalDocumentHealthCardIssuer,createDemoClinicalDocumentHealthCardIssuer,verifyClinicalDocumentHealthCard,type AuthorizedClinicalDocument,type AuthorizedClinicalDocumentPort,type ClinicalDocumentHealthCardCommand,type ClinicalDocumentIssuer,type IssuedClinicalDocumentHealthCard,type OrganizationClinicalDocumentKeyVault,type VerifiedClinicalDocumentHealthCard} from './clinical-document-health-card.js'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 import type {ServerProfileSealer} from './profile-sealer.js'
 import {clinicalDocumentCompactInput} from './clinical-document-credential-input.js'
@@ -74,17 +74,28 @@ export interface ClinicalDocumentCompanionIssuer{
  publicProofJwks(issuer:string):Promise<Readonly<{keys:readonly PublicProofKey[]}>>
 }
 /** Standard ES256 SHC plus an explicitly separate signature-covered SOS clinical-proof profile over its exact compact bytes. */
-export function createClinicalDocumentCompanionIssuer(options:Readonly<{documents:AuthorizedClinicalDocumentPort;keys:OrganizationClinicalDocumentKeyVault;proofKeys:OrganizationClinicalDocumentProofKeyVault;issuers:readonly ClinicalDocumentIssuer[];nowSeconds?:()=>number}>):ClinicalDocumentCompanionIssuer{
+type OrganizationClinicalDocumentCompanionOptions=Readonly<{documents:AuthorizedClinicalDocumentPort;keys:OrganizationClinicalDocumentKeyVault;proofKeys:OrganizationClinicalDocumentProofKeyVault;issuers:readonly ClinicalDocumentIssuer[];nowSeconds?:()=>number}>
+export function createClinicalDocumentCompanionIssuer(options:OrganizationClinicalDocumentCompanionOptions):ClinicalDocumentCompanionIssuer{
+ return clinicalDocumentCompanionIssuer(options)
+}
+/** Demo-only persistent signer; clinical ownership and current author checks are
+ * unchanged. Hosts keep this realm out of network-mode trust configuration. */
+export function createDemoClinicalDocumentCompanionIssuer(options:Omit<OrganizationClinicalDocumentCompanionOptions,'issuers'>&Readonly<{signingRealm:ClinicalDocumentIssuer}>):ClinicalDocumentCompanionIssuer{
+ return clinicalDocumentCompanionIssuer({...options,issuers:[options.signingRealm]},options.signingRealm)
+}
+function clinicalDocumentCompanionIssuer(options:OrganizationClinicalDocumentCompanionOptions,signingRealm?:ClinicalDocumentIssuer):ClinicalDocumentCompanionIssuer{
  const proof=vaults.get(options.proofKeys);if(!proof)fail('key_invalid')
- const issuers=structuredClone(options.issuers),standard=createClinicalDocumentHealthCardIssuer(options)
+ const issuers=structuredClone(options.issuers),realm=signingRealm?structuredClone(signingRealm):undefined
+ const standardFor=(documents:AuthorizedClinicalDocumentPort)=>realm?createDemoClinicalDocumentHealthCardIssuer({...options,documents,signingRealm:realm}):createClinicalDocumentHealthCardIssuer({...options,documents,issuers})
+ const standard=standardFor(options.documents)
  return Object.freeze({
   async issue(command:ClinicalDocumentHealthCardCommand):Promise<IssuedClinicalDocumentWithCompanion>{
    // Each issue owns its snapshot; concurrent calls cannot replace one another's authority state.
    const captured:{source?:AuthorizedClinicalDocument}={}
-   const issuer=createClinicalDocumentHealthCardIssuer({...options,issuers,documents:{async readAuthorizedDocument(input){const source=await options.documents.readAuthorizedDocument(input);captured.source=source?structuredClone(source):undefined;return source}}})
+   const issuer=standardFor({async readAuthorizedDocument(input){const source=await options.documents.readAuthorizedDocument(input);captured.source=source?structuredClone(source):undefined;return source}})
    const card=await issuer.issue(command),source=captured.source
    if(!source)throw new ClinicalDocumentHealthCardError('clinical_document_shc_authorization_denied')
-   const config=issuers.find(v=>v.organizationReference===source.organizationReference&&v.issuer===card.issuer)
+   const config=issuers.find(v=>(realm||v.organizationReference===source.organizationReference)&&v.issuer===card.issuer)
    if(!config)fail('key_invalid')
    const recheck=async()=>{const current=await options.documents.readAuthorizedDocument({documentReference:command.documentReference});if(snapshot(current)!==snapshot(source))throw new ClinicalDocumentHealthCardError('clinical_document_shc_authorization_denied')}
    await recheck();const row=await proof.ensure(config.organizationReference);await recheck()
