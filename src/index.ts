@@ -12,6 +12,8 @@ export * from './server-passkey-profile.js';
 export * from './host-organization-directory-client.js';
 export * from './secure-organization-registration.js';
 export * from './portable-professional-evidence.js';
+export * from './clinical-document-health-card.js';
+export * from './clinical-document-pq-companion.js';
 export * from './subject-card-provider-catalog-client.js';
 export * from './transactional-vault.js';
 export * from './vault-passkey-store.js';
@@ -46,3 +48,7 @@ export * from './registered-employee-draft-requester.js'
 export * from './madrid-public-registry.js'
 export * from './public-registry-http.js'
 export * from './registered-employee-clinical-care.js'
+
+export * from './portal-clinical-document-vault.js'
+
+export * from './portal-demo-clinical-author-context.js'

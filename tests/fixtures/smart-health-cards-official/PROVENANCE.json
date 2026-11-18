@@ -1,0 +1,23 @@
+﻿{
+    "scope":  "ES256 signature interoperability only; acceptance of x5c/crlVersion metadata does not establish certificate-chain trust or revocation status.",
+    "retrievedAtUtc":  "2026-11-18T06:36:08.4881508Z",
+    "description":  "Official public SMART Health Cards example fixtures. These are specification examples, not user or production clinical records.",
+    "files":  [
+                  {
+                      "url":  "https://spec.smarthealth.cards/examples/issuer/.well-known/jwks.json",
+                      "file":  "jwks.json",
+                      "sha256":  "97806cfb3f14f013ddee252a4681c40510ec6bd56fd7da597423e7a236e2e577"
+                  },
+                  {
+                      "url":  "https://spec.smarthealth.cards/examples/example-01-d-jws.txt",
+                      "file":  "example-01-d-jws.txt",
+                      "sha256":  "d6992bd14c3d686ce07fb57e63562a49070b38ddf84368880e397b93c3917e5c"
+                  },
+                  {
+                      "url":  "https://spec.smarthealth.cards/examples/example-00-d-jws.txt",
+                      "file":  "example-00-d-jws.txt",
+                      "sha256":  "3713c1ef73ca54eba7dccebbbf17c26d2a6c46db201d9c90895a01132d8fbd29"
+                  }
+              ],
+    "examplesPage":  "https://spec.smarthealth.cards/examples/"
+}

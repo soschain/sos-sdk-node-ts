@@ -1,5 +1,9 @@
 # sos-sdk-node-ts
 
+Organization clinical document SHC issuance, verification and separate
+post-quantum companion proofs are documented in
+[`docs/CLINICAL_DOCUMENT_HEALTH_CARDS.md`](docs/CLINICAL_DOCUMENT_HEALTH_CARDS.md).
+
 Copyright 2026 Connecting Solution & Applications Ltd.
 Licensed under the Apache License, Version 2.0; see [`NOTICE`](NOTICE).
 

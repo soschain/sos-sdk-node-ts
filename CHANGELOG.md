@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- Validate the integrated implementation with a strict build and all 499 Node
+  tests passing, including retained email invitation behavior and the official
+  SMART Health Card examples. Portal browser journeys and publication remain
+  separate release checks.
+
+- Keep issuer JWKS lookup read-only until an authorized issuance initializes
+  organization custody. Add separate organization ML-DSA-65 companion proofs
+  over exact ES256 SHC bytes with independent sealed seeds, public-only AKP
+  projections and same-issuer verification; standard SHC remains unchanged.
+
+- Accept verified email or phone contacts in the existing workforce invitation,
+  activation and installation lifecycle. Add strict clinical-author admission
+  requiring current organization, licence, active installation and explicit
+  group membership within supported clinical author roles; retain legacy email
+  methods, nonclinical workforce activation and sealed invitation behavior.
+  Compose admission through a caller-owned transaction in the same workforce
+  vault without opening a nested transaction.
+- Persist a dedicated clinical assignment UUID during controller invitation or
+  reissue and retain it through activation/readback. Require that assignment for
+  clinical admission; preserve legacy pending-code AAD and ordinary access.
+
+- Add clinical-document SHC issuance from an authorized stored revision with
+  independent sealed organization P-256 keys and public-only JWKS. Verify ES256
+  signatures from complete numeric, compact and signed-file inputs against
+  configured issuers with bounded decoding. Profile/PQ signing remains separate.
+
 ## 0.6.0
 
 - Pin the verified Antifraud Data 0.4.0, FHIR Data 0.8.0, SOS Data 0.8.4 and

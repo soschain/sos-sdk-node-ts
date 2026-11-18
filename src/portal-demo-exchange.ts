@@ -1,3 +1,4 @@
+import type {PortalDemoClinicalAuthorContext} from './portal-demo-clinical-author-context.js'
 import {SOSCHAIN_DEMO_ORGANIZATIONS,SOSCHAIN_PROFESSIONAL_DEMO_PROFILES} from 'sos-data-utils-ts/portal-access-profiles'
 import {normalizeConsentTarget} from 'sos-data-utils-ts/consent-coverage'
 import {normalizeProfileIndexContact,ProfileIndexContactKind} from 'sos-data-utils-ts/confidential-profile-index'
@@ -21,6 +22,7 @@ import {normalizeSubjectRegistrationCommand,assertProvisionalSubjectRegistration
 import type {OrganizationSubjectRegisterCapability} from 'sos-data-utils-ts/organization-workflow-access'
 import {normalizePendingSubjectEvidenceCommand,assertPendingSubjectEvidenceReceipt,PendingSubjectEvidencePolicy,type PendingSubjectEvidenceCommand,type PendingSubjectEvidenceReceipt} from 'sos-data-utils-ts/provisional-subject-evidence'
 import {buildDidCommInlineBinaryAttachment,buildSha3_384EvidenceContentIdFromDigest} from 'antifraud-data-utils-ts/identity-assurance'
+import type {PortalClinicalDocumentVaultProvider,PortalClinicalDocumentOperation,PortalClinicalDocumentResult} from './portal-clinical-document-vault.js'
 import type {PendingSubjectEvidenceUploadDocument} from './provisional-subject-evidence-vault.js'
 
 /** Minimal synthetic directory projection; it does not convey real subject authority. */
@@ -98,19 +100,19 @@ export class PortalDemoExchange {
     if(transaction) await register(transaction)
     else await this.options.store.runTransaction(register)
   }
-  async resolveCard(scope:DemoWorkspaceScope,cardNumber:string):Promise<PortalDemoCard> {
-    const collection=collections(scope).cards
+  async resolveCard(scope:DemoWorkspaceScope,cardNumber:string,transaction?:IVaultRepository):Promise<PortalDemoCard> {
+    const collection=collections(scope).cards,store=transaction??this.options.store
     const locator=typeof cardNumber==='string'?cardNumber.trim():''
     if(!locator||locator.length>2048)throw new Error('demo_card_not_found')
     const numeric=locator.replace(/[\s-]/gu,'')
     let card:CardRecord|undefined
-    if(/^\d{21}$/u.test(numeric))card=await this.options.store.get<CardRecord>(collection,hash(numeric))
+    if(/^\d{21}$/u.test(numeric))card=await store.get<CardRecord>(collection,hash(numeric))
     else {
       // Match registered aliases exactly. Never derive a number from an arbitrary
       // DID host/path, fetch a supplied URL or search another Demo scope.
       const attribute=locator.startsWith('did:web:')?'cardDid':locator.startsWith('urn:uuid:')?'subjectIdentifier':undefined
       if(attribute){
-        const matches=(await this.options.store.query<CardRecord>(collection,{where:[{attribute,equals:locator}]})).filter(record=>record.expiresAt>this.now())
+        const matches=(await store.query<CardRecord>(collection,{where:[{attribute,equals:locator}]})).filter(record=>record.expiresAt>this.now())
         if(matches.length===1)card=matches[0]
       }
     }
@@ -190,7 +192,7 @@ export class PortalDemoExchange {
 }
 
 /** These fields are supplied only by the authenticated peer BFF after resolving its protected profile. */
-export type PortalDemoCareParticipant=PortalDemoParticipant & Readonly<{profileId?:string;profileExpiresAt?:number;organizationReference?:string;organizationSpaceKey?:string;sector?:string;departmentId?:string;encounterWrite?:boolean;schedulingWrite?:boolean;subjectRegistrationCapability?:OrganizationSubjectRegisterCapability;verifiedEmail?:string;verifiedPhone?:string;roleClaim?:string}>
+export type PortalDemoCareParticipant=PortalDemoParticipant & Readonly<{profileId?:string;profileExpiresAt?:number;organizationReference?:string;organizationSpaceKey?:string;sector?:string;departmentId?:string;encounterWrite?:boolean;schedulingWrite?:boolean;subjectRegistrationCapability?:OrganizationSubjectRegisterCapability;verifiedEmail?:string;verifiedPhone?:string;roleClaim?:string;installationRegistrationId?:string;installationGeneration?:number;clinicalAuthorization?:PortalDemoClinicalAuthorContext}>
 
 /** BFF-only input: callers derive the account identifier from verified authentication, never a form field. */
 export function derivePortalDemoOrganizationIdentity(scopeKey:string,accountIdentifier:string,sector:string){
@@ -212,6 +214,7 @@ export type PortalDemoConsentOperation=Readonly<{kind:'inspect';purpose:string;s
 export type PortalDemoConsentEvaluation=Pick<EffectiveAccessEvaluation,'allowed'|'denied'|'partial'|'allowedSections'|'deniedSections'|'allowedResourceTypes'|'deniedResourceTypes'|'missing'>
 export type PortalDemoConsentResult=Readonly<{kind:'evaluation';evaluation:PortalDemoConsentEvaluation}>|Readonly<{kind:'request';claims:Readonly<Record<string,unknown>>}>
 export type PortalDemoConsentProviderFactory=(input:Readonly<{scope:DemoWorkspaceScope;subjectIdentifier:string;participant:PortalDemoCareParticipant}>)=>Promise<Readonly<{provider:PortalConsentVaultProvider;actor:ConsentActorDescriptor;actorRole:string;requestContext?:Omit<PortalPermissionRequestContext,'consentIdentifier'|'requestedAt'>}>>
+export type PortalDemoClinicalDocumentProviderFactory=(input:Readonly<{scope:DemoWorkspaceScope;subjectIdentifier:string;participant:PortalDemoCareParticipant}>)=>Promise<PortalClinicalDocumentVaultProvider>
 export type PortalDemoCareProviderFactory=(input:Readonly<{scope:DemoWorkspaceScope;subjectIdentifier:string;participant:PortalDemoCareParticipant}>)=>Promise<PortalCareVaultProvider>
 export type PortalDemoCareInboxProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant}>)=>Promise<readonly string[]>
 export type PortalDemoCatalogSnapshot=OrganizationCatalogVaultSnapshot&Readonly<{directory?:readonly import('sos-data-utils-ts/portal-demo-service-directory').PortalDemoServiceDirectoryEntry[]}>
@@ -225,7 +228,7 @@ export type PortalDemoSubjectEvidenceProvider=Readonly<{
 const EVIDENCE_TRANSFER_HEADER='x-portal-evidence-transfer'
 // Each file rounds independently; reserve separate bounded JSON/metadata overhead.
 const EVIDENCE_TRANSFER_LIMIT=PendingSubjectEvidencePolicy.maxFiles*4*Math.ceil(PendingSubjectEvidencePolicy.maxFileBytes/3)+64*1024
-export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory;careInboxProvider?:PortalDemoCareInboxProvider;consentProviderFactory?:PortalDemoConsentProviderFactory;catalogProvider?:PortalDemoCatalogProvider;registrationProvider?:PortalDemoRegistrationProvider;registrationReadProvider?:PortalDemoRegistrationReadProvider;subjectEvidenceProvider?:PortalDemoSubjectEvidenceProvider}>) {
+export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory;clinicalDocumentProviderFactory?:PortalDemoClinicalDocumentProviderFactory;careInboxProvider?:PortalDemoCareInboxProvider;consentProviderFactory?:PortalDemoConsentProviderFactory;catalogProvider?:PortalDemoCatalogProvider;registrationProvider?:PortalDemoRegistrationProvider;registrationReadProvider?:PortalDemoRegistrationReadProvider;subjectEvidenceProvider?:PortalDemoSubjectEvidenceProvider}>) {
   const authorized=serviceCredential(options.bearer)
   collections(options.scope)
   return async(request:Request):Promise<Response>=>{
@@ -236,7 +239,7 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
       const declaredLength=request.headers.get('content-length')
       if(evidenceTransfer&&declaredLength!==null&&(!/^\d+$/u.test(declaredLength)||Number(declaredLength)>EVIDENCE_TRANSFER_LIMIT))return Response.json({error:'subject_registration_evidence_too_large'},{status:413})
       const text=evidenceTransfer?await boundedEvidenceText(request):await request.text();if(!evidenceTransfer&&Buffer.byteLength(text)>32_768) return Response.json({error:'demo_exchange_request_too_large'},{status:413})
-      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;consent:PortalDemoConsentOperation;catalog:OrganizationCatalogVaultOperation;command:unknown;registrationId:string;documents:unknown}
+      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;clinicalDocument:PortalClinicalDocumentOperation;consent:PortalDemoConsentOperation;catalog:OrganizationCatalogVaultOperation;command:unknown;registrationId:string;documents:unknown}
       if(evidenceTransfer&&body.operation!=='submitSubjectEvidence')throw new TypeError('subject_registration_evidence_transfer_invalid')
       collections(body.scope)
       if(body.scope.key!==options.scope.key) return Response.json({error:'demo_exchange_scope_forbidden'},{status:403})
@@ -264,7 +267,7 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
         assertProvisionalSubjectRegistrationReceipt(result)
         return Response.json({result})
       }
-      if(['consent','care','catalog','careInboxSubjects'].includes(body.operation))validateVerifiedPhone(body.participant?.verifiedPhone)
+      if(['consent','care','catalog','careInboxSubjects','clinicalDocument'].includes(body.operation))validateVerifiedPhone(body.participant?.verifiedPhone)
       if(body.operation==='catalog'){
         if(!options.catalogProvider)throw new Error('demo_catalog_provider_unavailable')
         if(typeof body.participant?.actorIdentifier!=='string'||!body.participant.actorIdentifier)throw new TypeError('catalog_request_invalid')
@@ -297,6 +300,13 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
         }
         throw new TypeError('consent_request_invalid')
       }
+      if(body.operation==='clinicalDocument'){
+        if(!options.clinicalDocumentProviderFactory)throw new Error('care_document_provider_unavailable')
+        if(typeof body.subjectIdentifier!=='string'||!body.subjectIdentifier||typeof body.participant?.actorIdentifier!=='string'||!body.participant.actorIdentifier)throw new TypeError('care_document_request_invalid')
+        const provider=await options.clinicalDocumentProviderFactory({scope:body.scope,subjectIdentifier:body.subjectIdentifier,participant:body.participant})
+        const {executePortalClinicalDocumentOperation}=await import('./portal-clinical-document-vault.js')
+        return Response.json({result:await executePortalClinicalDocumentOperation(provider,body.clinicalDocument)})
+      }
       if(body.operation==='care'){
         if(!options.careProviderFactory)throw new Error('demo_care_provider_unavailable')
         if(typeof body.subjectIdentifier!=='string'||!body.subjectIdentifier||typeof body.participant?.actorIdentifier!=='string'||!body.participant.actorIdentifier)throw new TypeError('care_request_invalid')
@@ -313,7 +323,7 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
       const message=error instanceof Error?error.message:''
       const code=/^(?:demo_|portal_rtc_|care_|encounter_|consent_|catalog_|subject_registration_)[a-z0-9_]+$/u.test(message)?message
         :error instanceof SyntaxError||error instanceof TypeError?'demo_exchange_request_invalid':'demo_exchange_failed'
-      const status=code==='demo_exchange_failed'?502:code==='subject_registration_evidence_too_large'?413:code==='subject_registration_evidence_expired'?410:code==='subject_registration_evidence_integrity'?409:['demo_care_provider_unavailable','demo_consent_provider_unavailable','demo_catalog_provider_unavailable','subject_registration_provider_unavailable','subject_registration_evidence_provider_unavailable'].includes(code)?503:code==='care_context_expired'?401
+      const status=code==='demo_exchange_failed'?502:code==='subject_registration_evidence_too_large'?413:code==='subject_registration_evidence_expired'?410:code==='subject_registration_evidence_integrity'?409:['demo_care_provider_unavailable','care_document_provider_unavailable','demo_consent_provider_unavailable','demo_catalog_provider_unavailable','subject_registration_provider_unavailable','subject_registration_evidence_provider_unavailable'].includes(code)?503:['care_context_expired','care_document_context_expired'].includes(code)?401
         :code==='demo_card_not_found'||code.startsWith('care_')&&code.endsWith('_not_found')||code.startsWith('subject_registration_')&&code.endsWith('_not_found')?404
           :/forbidden|required|identity_mismatch/u.test(code)?403:/transition_invalid|revision_conflict|resource_conflict|idempotency_conflict|request_conflict/u.test(code)?409:400
       return Response.json({error:code},{status})
@@ -361,6 +371,7 @@ export class PortalDemoExchangeClient {
   listEvents(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoParticipant):Promise<PortalRtcCallEvent[]> {return this.call({operation:'listEvents',scope,subjectIdentifier,participant})}
   async submitEvent(scope:DemoWorkspaceScope,event:PortalRtcCallEvent,participant:PortalDemoParticipant):Promise<void> {await this.call({operation:'submitEvent',scope,event,participant})}
   care(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoCareParticipant,care:PortalCareOperation):Promise<PortalCareOperationResult>{return this.call({operation:'care',scope,subjectIdentifier,participant,care})}
+  clinicalDocument(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoCareParticipant,clinicalDocument:PortalClinicalDocumentOperation):Promise<PortalClinicalDocumentResult>{return this.call({operation:'clinicalDocument',scope,subjectIdentifier,participant,clinicalDocument})}
   careInboxSubjects(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant):Promise<readonly string[]>{return this.call({operation:'careInboxSubjects',scope,participant})}
   catalog(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant,catalog:OrganizationCatalogVaultOperation):Promise<PortalDemoCatalogSnapshot>{return this.call({operation:'catalog',scope,participant,catalog})}
   consent(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoCareParticipant,consent:PortalDemoConsentOperation):Promise<PortalDemoConsentResult>{return this.call({operation:'consent',scope,subjectIdentifier,participant,consent})}
