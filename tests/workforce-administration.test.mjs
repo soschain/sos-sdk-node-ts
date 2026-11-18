@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {createHash,randomBytes,randomUUID} from 'node:crypto'
 import {CryptographyService} from 'antifraud-data-utils-ts/cryptography'
-import {buildOrganizationEmployeeDidWeb} from 'antifraud-data-utils-ts/organization-identity'
+import {buildOrganizationEmployeeDidWeb,buildStableActorIdentifier} from 'antifraud-data-utils-ts/organization-identity'
 import {SchemaOrgPersonClaim as Person,SchemaOrgOfferClaim as Offer,SchemaOrgOrganizationClaim as Organization,SchemaOrgIndividualProductClaim as Product,SchemaOrgOrderClaim as Order} from 'antifraud-data-utils-ts/schema-org-claims'
 import {REPOSITORY_SAFE_EXAMPLES as safe} from 'sos-data-utils-ts/repository-privacy'
 import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
@@ -273,3 +273,40 @@ test('generic Consent acknowledgement cannot masquerade as the routed versioned 
  const f=await fixture(async()=>({iss:providerDid,body:{resourceType:'Bundle',type:'_batch-response',data:[{type:'Consent',response:{status:'201'}}]}}))
  await assert.rejects(f.client.submitWorkflowAccess({resourceType:'Consent',entries:[entry],operationId:`workflow-wrong-owner-${safe.resourceUuid}`},{intervalMs:0}),/workforce_workflow_receipt_invalid/u)
 })
+
+// Current SOS controller writers keep technical responsibility separate from occupational qualifications.
+for(const shape of ['bootstrap-occupation','renewed-opaque-contact'])test(`projects signed current controller inventory (${shape}) without treating responsibility as occupation`,async()=>{
+ const controllerRole=HealthcareActorRoles.Controller,contact=phone;
+ const did=buildOrganizationEmployeeDidWeb({...contact,organizationDidWeb:providerDid,role:controllerRole});
+ const employee=employeeRow(),licence=licenseRow();
+ employee.resource.id=did;employee.resource.claims[Person.Identifier]=did;
+ employee.resource.claims[Person.AdditionalType]=controllerRole;
+ employee.resource.claims[Person.SameAs]=buildStableActorIdentifier(contact);
+ licence.resource.meta.subjectId=did;licence.resource.meta.claims[Person.OccupationIdentifierValue]=controllerRole;
+ if(shape==='renewed-opaque-contact'){
+  delete employee.resource.claims[Person.Telephone];delete employee.resource.claims[Person.HasOccupation];
+  employee.resource.claims[Person.OccupationalCategory]=[role];delete employee.resource.contained;
+ }else employee.resource.contained[0].employeeId=did;
+ const f=await fixture(async path=>path.includes('/Employee/')?{iss:tenantIssuer,body:{data:[employee]}}:{iss:providerDid,body:{data:[licence]}});
+ const result=await f.client.getAdministration({intervalMs:0});
+ assert.equal(result.employees.length,1);assert.equal(result.employees[0].roleCode,controllerRole);
+ assert.equal(result.employees[0].employeeDid,did);assert.equal(result.employees[0].telephone,phone.contact);
+ assert.equal(result.employees[0].license.id,licence.resource.id);
+ assert.equal(employee.resource.claims[Person.HasOccupation]??employee.resource.claims[Person.OccupationalCategory][0],role);
+});
+
+test('opaque controller inventory denies mismatched stable contact and ambiguous linked licences',async()=>{
+ const did=buildOrganizationEmployeeDidWeb({...phone,organizationDidWeb:providerDid,role:HealthcareActorRoles.Controller});
+ const original=employeeRow(),licence=licenseRow();original.resource.id=did;delete original.resource.contained;
+ original.resource.claims={[Person.Identifier]:did,[Person.AdditionalType]:HealthcareActorRoles.Controller,[Person.OccupationalCategory]:[role],[Person.SameAs]:buildStableActorIdentifier(phone)};
+ licence.resource.meta.subjectId=did;licence.resource.meta.claims[Person.OccupationIdentifierValue]=HealthcareActorRoles.Controller;
+ for(const mode of ['wrong-contact','missing-seat','ambiguous-seat','foreign-did']){
+  const employee=structuredClone(original),licenses=[structuredClone(licence)];
+  if(mode==='wrong-contact')employee.resource.claims[Person.SameAs]=buildStableActorIdentifier({contactKind:'email',contact:safe.firstContactEmail});
+  if(mode==='missing-seat')licenses.length=0;
+  if(mode==='ambiguous-seat')licenses.push({...structuredClone(licence),resource:{...structuredClone(licence.resource),id:'synthetic-second-seat'}});
+  if(mode==='foreign-did')employee.resource.claims[Person.Identifier]=employeeDid;
+  const f=await fixture(async path=>path.includes('/Employee/')?{iss:tenantIssuer,body:{data:[employee]}}:{iss:providerDid,body:{data:licenses}});
+  await assert.rejects(f.client.getAdministration({intervalMs:0}),undefined,mode);
+ }
+});

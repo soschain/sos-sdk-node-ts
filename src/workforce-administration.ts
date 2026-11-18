@@ -1,4 +1,5 @@
-import {buildOrganizationEmployeeDidWeb,normalizeActorContact,normalizeUuid,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
+import {buildOrganizationEmployeeDidWeb,buildStableActorIdentifier,normalizeActorContact,normalizeUuid,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
+import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
 import {readIsco08Code} from 'antifraud-data-utils-ts/isco-08'
 import {normalizePublicAliasList} from 'antifraud-data-utils-ts/public-aliases'
 import {SchemaOrgPersonClaim as Person,SchemaOrgIndividualProductClaim as Product,SchemaOrgOrganizationClaim as Organization} from 'antifraud-data-utils-ts/schema-org-claims'
@@ -44,6 +45,8 @@ function sameRole(left:string,right:string):boolean{
 function role(value:Row):string{
  const direct=optionalText(value[Person.HasOccupation]),identifier=optionalText(value[Person.OccupationIdentifierValue])
  if(direct&&identifier&&!sameRole(direct,identifier))throw invalid()
+ // Technical responsibility and occupational qualification are separate signed claims.
+ if(value[Person.AdditionalType]===HealthcareActorRoles.Controller)return HealthcareActorRoles.Controller
  return text(identifier??direct)
 }
 function sameId(left:string,right:string):boolean{
@@ -83,8 +86,18 @@ function deviceList(meta:Row,owner:ActorContactInput):OrganizationEmployeeLicens
 export function projectWorkforceAdministration(employeeResponse:unknown,licenseResponse:unknown,providerDid:string):{
  employees:OrganizationEmployeeLifecycleRecord[];licenses:LicenseListSummary
 }{
+ const licenseResources=resources(licenseResponse)
  const people=resources(employeeResponse).map(resource=>{
-  const id=text(resource.id),value=claims(resource),owner=contact(value),roleCode=role(value)
+  const id=text(resource.id),value=claims(resource),roleCode=role(value)
+  let owner:ActorContactInput
+  if(value[Person.Email]===undefined&&value[Person.Telephone]===undefined&&roleCode===HealthcareActorRoles.Controller){
+   const seats=licenseResources.filter(seat=>sameId(optionalText(object(seat.meta).subjectId)??'',id))
+   if(seats.length!==1)throw invalid()
+   const seat=seats[0]!,meta=object(seat.meta)
+   if(text(meta.status??seat.status)!=='active'||role(claims(seat))!==HealthcareActorRoles.Controller)throw invalid()
+   owner=contact(claims(seat))
+   if(!normalizePublicAliasList(value[Person.SameAs]).includes(buildStableActorIdentifier(owner)))throw invalid()
+  }else owner=contact(value)
   const employeeDid=buildOrganizationEmployeeDidWeb({...owner,organizationDidWeb:providerDid,role:roleCode})
   const identifier=optionalText(value[Person.Identifier])
   if(identifier!==employeeDid&&!normalizePublicAliasList(value[Person.SameAs]).includes(employeeDid))throw invalid()
@@ -96,7 +109,7 @@ export function projectWorkforceAdministration(employeeResponse:unknown,licenseR
  const summary={contracted:0,free:0,used:0,available:0,issued:0,active:0,inactive:0}
  const linked=new Map<string,OrganizationEmployeeLicenseRecord>()
  const licenseIds=new Set<string>()
- for(const resource of resources(licenseResponse)){
+ for(const resource of licenseResources){
   const id=text(resource.id),meta=object(resource.meta),value=claims(resource),status=text(meta.status??resource.status)
   if(licenseIds.has(id))throw invalid();licenseIds.add(id)
   summary.contracted++

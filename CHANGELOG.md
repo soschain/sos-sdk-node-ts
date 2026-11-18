@@ -2,6 +2,11 @@
 
 ## 0.6.0
 
+- Project the controller's technical responsibility separately from occupational
+  qualifications in signed workforce inventory. Resolve an omitted contact only
+  through one active, exactly linked licence with matching stable identity and
+  employee DID; preserve existing occupations and all gateway authorization.
+
 - Preserve access for existing individual-member profiles carrying their own
   protected presentation. Reopen and forward that exact presentation for
   gateway verification, retaining member scope and current consent checks;
