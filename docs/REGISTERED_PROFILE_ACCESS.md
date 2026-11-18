@@ -42,13 +42,18 @@ the stored DCR client as `iss` and `sub`, exact SMART endpoint as `aud`, current
 `iat`, a five-minute `exp` and fresh `jti`. It is a distinct capability from
 actor and VP signing; their existing client-bound methods remain unchanged.
 
-The configured gateway signature, envelope issuer/audience/thread, access JWT
-issuer/audience/actor/operation/time, granted scopes and response patient all
-must match. The access JWT `sub` is the actor; the separately bound response
+The configured gateway signature, envelope issuer/audience/operation/thread,
+access JWT issuer/audience/actor/time, its own nonempty token identifier, granted
+scopes and response patient all must match. The access JWT `sub` is the actor; the separately bound response
 patient is the selected canonical subject. Missing granted scopes never fall
 back to requested scopes. Existing Composition r/rs/cruds permissions are
 supported here; every granted action and section must be a subset of a requested
 permission. Narrower grants are retained exactly and foreign/extra grants fail.
+
+The signed SMART response carries the original request operation identifier and
+thread. The access token's `jti` identifies that token independently; it need not
+repeat the request identifier. Both bindings are checked before the token is
+sealed into the selected session.
 
 `gateway.smartTokenVerification` is an explicit host-selected algorithm and
 signing-key resolver, separate from outer PQC communication verification.

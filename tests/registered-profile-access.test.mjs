@@ -1,4 +1,4 @@
-// Flow contract: one existing actor unlocks registered custody, discovers only provider-confirmed subjects through real encrypted HTTP protocol bytes, obtains exact subject-bound SMART authorization using its normal ES384 client-assertion key, and resolves/reset/revokes the same sealed session. The HTTP peer is synthetic protocol evidence, not online GW acceptance.
+// Flow contract: one existing actor unlocks registered custody, discovers only provider-confirmed subjects through real encrypted HTTP protocol bytes, obtains exact subject-bound SMART authorization using its normal ES384 client-assertion key, and resolves/reset/revokes the same sealed session. The signed response correlates its request while each SMART JWT retains its independent identifier. The HTTP peer is synthetic protocol evidence, not online GW acceptance.
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import {createHash,createPublicKey,generateKeyPairSync,randomBytes,randomUUID,sign,verify} from 'node:crypto'
@@ -98,7 +98,7 @@ async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg}={}){
    started?.();if(gate)await gate
    if(fault==='consent')return new Response(JSON.stringify({error:'consent_missing'}),{status:403})
    const seconds=Math.floor(now/1000),scope=fault==='scope'?`${request.scope} user/Observation.cruds`:fault==='broader-cruds'?`${canonicalScope} ${canonicalCrud}`:fault==='narrow-grant'?canonicalScope:request.scope
-   const tokenClaims={iss:providerDid,sub:actorDid,aud:fault==='token-audience'?`${providerDid}:foreign`:providerDid,scope,jti:fault==='replayed-token'?'synthetic-other-operation':job.message.jti,iat:seconds,nbf:seconds,exp:fault==='expired-token'?seconds-1:seconds+120}
+   const tokenClaims={iss:providerDid,sub:actorDid,aud:fault==='token-audience'?`${providerDid}:foreign`:providerDid,scope,jti:fault==='independent-token-id'?randomUUID():fault==='missing-token-id'?undefined:fault==='empty-token-id'?'':fault==='invalid-token-id'?7:randomUUID(),iat:seconds,nbf:seconds,exp:fault==='expired-token'?seconds-1:seconds+120}
    let accessToken
    if(smartAlg==='ES384'||smartAlg==='ES256'){
     const header={alg:smartAlg,kid:fault==='smart-header-kid'?'synthetic-foreign-kid':ecPublic.kid,typ:'JWT'}
@@ -134,7 +134,7 @@ async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg}={}){
    body={data:[{resource:{resourceType:'Bundle',entry:entries}}]}
   }
   if(!job.path.includes('/License/')&&job.path!==smartPath){startedDirectory?.();if(directoryGate)await directoryGate}
-  const response={iss:fault==='provider'?`${providerDid}:foreign`:providerDid,aud:fault==='audience'?`${actorDid}:foreign`:actorDid,thid:fault==='thread'?'synthetic-other-thread':job.message.thid,body}
+  const response={jti:fault==='response-operation'?'synthetic-other-operation':fault==='missing-response-operation'?undefined:job.message.jti,iss:fault==='provider'?`${providerDid}:foreign`:providerDid,aud:fault==='audience'?`${actorDid}:foreign`:actorDid,thid:fault==='thread'?'synthetic-other-thread':job.message.thid,body}
   const encrypted=await peer.packForRecipientWithContext(response,actorDid,{context:peerContext})
   return new Response(JSON.stringify({response:encrypted}),{status:200})
  }
@@ -219,8 +219,28 @@ test('directory discovery grants no clinical token and a foreign selection is de
 })
 
 test('rejects signed foreign envelope and token bindings without persisting access',async t=>{
- for(const fault of ['provider','audience','thread','patient','scope','token-audience','replayed-token','expired-token']){
+ for(const fault of ['provider','audience','thread','patient','scope','token-audience','missing-token-id','empty-token-id','invalid-token-id','expired-token']){
   const f=await begin(t)
+  await f.access.refreshAuthorizedSubjects({...request(f.sessionId),verifiedContact:{email:safe.firstContactEmail}})
+  f.state.setFault(fault)
+  await assert.rejects(f.access.selectAuthorizedSubject({...request(f.sessionId),subjectDid:alias,scopes:[requestedScope]}))
+  assert.equal((await f.vault.get(sessions,f.sessionId)).sealedAccessToken,undefined)
+ }
+})
+
+test('accepts an independently identified ES384 SMART token only inside its signed matching request response',async t=>{
+ const f=await begin(t,{smartAlg:'ES384'})
+ await f.access.refreshAuthorizedSubjects({...request(f.sessionId),verifiedContact:{email:safe.firstContactEmail}})
+ f.state.setFault('independent-token-id')
+ const selected=await f.access.selectAuthorizedSubject({...request(f.sessionId),subjectDid:alias,scopes:[requestedScope]})
+ const tokenClaims=JSON.parse(Buffer.from(selected.accessToken.split('.')[1],'base64url'))
+ const operation=f.state.requests.find(row=>row.path===smartPath).message.jti
+ assert.ok(tokenClaims.jti);assert.notEqual(tokenClaims.jti,operation)
+ assert.equal((await f.access.resolveSession({...binding,sessionId:f.sessionId})).accessToken,selected.accessToken)
+})
+test('rejects a signed SMART response whose operation identifier is missing or belongs to another request',async t=>{
+ for(const fault of ['response-operation','missing-response-operation']){
+  const f=await begin(t,{smartAlg:'ES384'})
   await f.access.refreshAuthorizedSubjects({...request(f.sessionId),verifiedContact:{email:safe.firstContactEmail}})
   f.state.setFault(fault)
   await assert.rejects(f.access.selectAuthorizedSubject({...request(f.sessionId),subjectDid:alias,scopes:[requestedScope]}))

@@ -77,6 +77,9 @@ export class RegisteredGatewayTransport{
  }
  async exchange(path:string,payload:Row,expectedResponseIssuer:string,options:PollOptions={},bearerToken=this.options.bearerToken):Promise<SubmitAndPollResult>{
   const submit=await this.post(path,payload,bearerToken)
+  return {submit,poll:await this.poll(path,payload,expectedResponseIssuer,options,bearerToken)}
+ }
+ async poll(path:string,payload:Row,expectedResponseIssuer:string,options:PollOptions={},bearerToken=this.options.bearerToken):Promise<SubmitAndPollResult['poll']>{
   const started=Date.now(),timeout=options.timeoutMs??60000
   for(let attempts=1;;attempts++){
    if(Date.now()-started>=timeout)throw this.failure('poll_timeout')
@@ -86,7 +89,7 @@ export class RegisteredGatewayTransport{
     if(this.options.secureTransportAdapter&&(envelope?.iss!==expectedResponseIssuer||envelope?.aud!==payload.iss||envelope?.thid!==payload.thid))throw this.failure('response_binding_invalid')
     if((envelope?.iss!==undefined&&envelope.iss!==expectedResponseIssuer)||(envelope?.aud!==undefined&&envelope.aud!==payload.iss)||(envelope?.thid!==undefined&&envelope.thid!==payload.thid))throw this.failure('response_issuer_binding_invalid')
     for(const row of gatewayResponseEntries(poll.body)){const status=Number(record(row.response)?.status);if(status>=400)throw this.options.submitError(status,poll.body)}
-    return {submit,poll:{...poll,attempts}}
+    return {...poll,attempts}
    }
    const remaining=timeout-(Date.now()-started)
    if(remaining<=0)throw this.failure('poll_timeout')

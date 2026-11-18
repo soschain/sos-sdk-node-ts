@@ -2,6 +2,16 @@
 
 ## 0.6.0
 
+- Correlate SMART issuance through the signed response's request identifier
+  and thread while validating the JWT's independent token identifier. Preserve
+  pinned keys, signatures, issuer, audience, actor, time and scope checks.
+
+- Add optional encrypted-host checkpoint persistence to device enrollment.
+  Save the exact operation and custody binding before submission; recover an
+  uncertain acknowledgement by polling that operation, preserving both device
+  keys and the existing installation. Consumed or unavailable results require
+  explicit recovery instead of another registration.
+
 - Accept governed research and emergency ISCO-08 occupations in workforce
   provisioning and recipient enrollment, using the shared classification
   catalogue. Preserve current contact, role, device and licence bindings;

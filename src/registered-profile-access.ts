@@ -216,7 +216,7 @@ export class RegisteredProfileAccess{
   await this.commit(opened,{...rest,authorizedSubjects:assignments,authorizedSubjectDids,scopes:[]},{...opened.profile,allowedSubjectDids:authorizedSubjectDids,updatedAt:this.now().toISOString()})
   return {session:await this.resolveActorSession(input),subjects}
  }
- private async token(compact:string,opened:Opened,jti:string,patient:string,requested:readonly string[],body:Record<string,unknown>){
+ private async token(compact:string,opened:Opened,patient:string,requested:readonly string[],body:Record<string,unknown>){
   const parts=text(compact).split('.')
   if(parts.length!==3||parts.some(part=>!part||!/^[A-Za-z0-9_-]+$/u.test(part)))throw denied()
   const policy=this.options.gateway.smartTokenVerification
@@ -230,7 +230,8 @@ export class RegisteredProfileAccess{
    if(!verify(policy.algorithm==='ES384'?'sha384':'sha256',Buffer.from(`${parts[0]}.${parts[1]}`,'ascii'),{key:ec,dsaEncoding:'ieee-p1363'},Buffer.from(parts[2]!,'base64url')))throw denied()
   }else if(key.kty!=='AKP'||key.alg!==policy.algorithm||!await this.crypto.verifyJws(compact,key))throw denied()
   const claims=record(JSON.parse(Buffer.from(parts[1]!,'base64url').toString('utf8'))),now=Math.floor(this.now().getTime()/1000)
-  if(claims.iss!==opened.profile.providerDid||claims.aud!==opened.profile.providerDid||claims.sub!==opened.profile.actorDid||claims.jti!==jti||!Number.isSafeInteger(claims.exp)||Number(claims.exp)<=now)throw new Error('registered_profile_access_token_expired_or_binding_invalid')
+  text(claims.jti)
+  if(claims.iss!==opened.profile.providerDid||claims.aud!==opened.profile.providerDid||claims.sub!==opened.profile.actorDid||!Number.isSafeInteger(claims.exp)||Number(claims.exp)<=now)throw new Error('registered_profile_access_token_expired_or_binding_invalid')
   if(!Number.isSafeInteger(claims.iat)||Number(claims.iat)>now||(claims.nbf!==undefined&&(!Number.isSafeInteger(claims.nbf)||Number(claims.nbf)>now)))throw denied()
   if(body.subject!==patient||body.token_type!=='Bearer'||typeof body.scope!=='string'||claims.scope!==body.scope)throw denied()
   const grants=body.scope.split(/\s+/u).filter(Boolean)
@@ -248,8 +249,10 @@ export class RegisteredProfileAccess{
   const assertion=await opened.custody.signClientAssertion({clientId:opened.profile.clientId,audience,issuedAt:Math.floor(this.now().getTime()/1000),jti:randomUUID()})
   const message={thid:operation,jti:operation,iss:opened.profile.actorDid,aud:audience,client_id:opened.profile.clientId,body:{client_id:opened.profile.clientId,sub:opened.profile.actorDid,id_token:text(input.idToken),client_assertion:assertion,client_assertion_type:'private_key_jwt',acr_values:'urn:antifraud:acr:openid4vp:individual',purpose:'TREAT',scope:requested.join(' ')}}
   const result=await(await this.transport(input,opened)).exchange(path,message,this.options.gateway.responseIssuer,this.options.pollOptions)
-  const body=record(record(result.poll.body).body),accessToken=text(body.access_token)
-  const validated=await this.token(accessToken,opened,operation,patient,requested,body)
+  const envelope=record(result.poll.body)
+  if(envelope.jti!==operation)throw denied()
+  const body=record(envelope.body),accessToken=text(body.access_token)
+  const validated=await this.token(accessToken,opened,patient,requested,body)
   const sealedAccessToken=await this.options.sealer.seal(accessToken,`${input.sessionId}:access-token`)
   const {attester:_oldAttester,...rest}=opened.session
   const updated={...rest,subjectDid:patient,selectedSubjectDid:input.subjectDid,scopes:validated.scopes,sealedAccessToken,actorMode:assignment.actorMode,...(assignment.attester?{attester:assignment.attester}:{})}
@@ -262,11 +265,11 @@ export class RegisteredProfileAccess{
   const assignment=session.authorizedSubjects.find(subject=>subject.subjectDid===session.selectedSubjectDid)
   if(!assignment||session.actorMode!==assignment.actorMode||!equal(session.attester,assignment.attester))throw denied()
   const accessToken=await this.options.sealer.unseal(session.sealedAccessToken,`${input.sessionId}:access-token`)
-  // The operation jti was verified before sealing; resolve re-verifies all
-  // currently available authority and time claims, not a fresh HTTP operation.
+  // The signed response correlated the original HTTP operation before sealing.
+  // The token has its own identifier; resolve re-verifies its current authority and time claims.
   const parts=accessToken.split('.');if(parts.length!==3)throw denied()
   const claims=record(JSON.parse(Buffer.from(parts[1]!,'base64url').toString('utf8')))
-  await this.token(accessToken,opened,text(claims.jti),session.subjectDid,session.scopes,{subject:session.subjectDid,scope:session.scopes.join(' '),token_type:'Bearer'})
+  await this.token(accessToken,opened,session.subjectDid,session.scopes,{subject:session.subjectDid,scope:session.scopes.join(' '),token_type:'Bearer'})
   await this.commit(opened)
   return {sessionId:input.sessionId,profile:this.profileView(opened.profile,session),subjectDid:session.subjectDid,selectedSubjectDid:session.selectedSubjectDid,actorMode:session.actorMode??opened.profile.actorMode,scopes:[...session.scopes],accessToken,...(session.attester?{attester:session.attester}:{}),...await this.capabilities(input,opened,Number(claims.exp))}
  }

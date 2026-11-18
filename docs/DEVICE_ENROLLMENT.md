@@ -24,10 +24,51 @@ access token is optional because the current GW does not necessarily return one.
 provider and route checks before delegating to the same transport. Its existing
 error prefixes and submit-error class remain compatible.
 
-On an uncertain remote acknowledgement, a host must retain the same actual
-activation code, installation and complete public key request. Each retry has
-fresh transport correlation. The current GW's exact registration replay contract
-can return its original client receipt; older deployments may replace a device.
-Neither this client nor a synthetic transport-peer test proves that a deployed
-GW supports replay. Actual GW persisted-manager coverage and the online journey
-remain separate evidence.
+For durable enrollment, pass a third argument to `enroll` containing the last
+`checkpoint` and an awaited `saveCheckpoint` callback. The host seals the entire
+checkpoint in the same owner/profile-bound grant as the original wallet seed,
+derivation identifier and `clientInstanceId`. Never expose this state to a
+browser or logs: a checkpoint includes the short-lived initial access token and
+verified response receipts. Load it only from trusted, integrity-protected
+server persistence, not from caller input.
+
+The SDK awaits persistence before each Token or Device submission. A resumed
+pending operation polls its original correlation identifier; it never submits a
+second registration. Its binding digest rejects a changed actor, provider,
+route, activation code, installation, public custody or redirect URI. A completed
+checkpoint returns the original enrollment receipt without another mutation.
+That receipt records enrollment; current access still requires the normal
+session, device and authorization checks.
+
+```ts
+import {
+  DeviceEnrollmentClient,
+  type DeviceEnrollmentInput,
+  type DeviceEnrollmentCheckpoint,
+} from 'sos-sdk-node-ts/device-enrollment-client'
+
+export function enrollFromStoredGrant(
+  client: DeviceEnrollmentClient,
+  input: DeviceEnrollmentInput,
+  checkpoint: DeviceEnrollmentCheckpoint | undefined,
+  saveCheckpoint: (value: DeviceEnrollmentCheckpoint) => Promise<void>,
+) {
+  return client.enroll(input, undefined, {checkpoint, saveCheckpoint})
+}
+```
+
+The callback uses the host's existing encrypted, owner/profile-bound
+persistence adapter. It must preserve the same seed and installation before the
+first network call and compare/update the checkpoint atomically so competing callers cannot start
+a second operation. A persistence failure
+before submission prevents that network mutation.
+
+A lost submit acknowledgement can be recovered while its original result
+remains available. The current GW consumes a completed result when it serves the
+poll response. If that response is lost, already consumed, expired or no longer
+authorized, resumption fails with `DeviceEnrollmentRecoveryRequiredError`.
+The host keeps the sealed grant for explicit recovery rather than repeating DCR,
+replacing a device or generating new custody. Two-argument enrollment remains
+available for existing callers; it does not provide durable retry protection.
+Actual GW manager and authenticated online tests remain separate evidence from
+the SDK's encrypted transport-peer tests.
