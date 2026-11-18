@@ -1,6 +1,36 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
+
+- Project the controller's technical responsibility separately from occupational
+  qualifications in signed workforce inventory. Resolve an omitted contact only
+  through one active, exactly linked licence with matching stable identity and
+  employee DID; preserve existing occupations and all gateway authorization.
+
+- Preserve access for existing individual-member profiles carrying their own
+  protected presentation. Reopen and forward that exact presentation for
+  gateway verification, retaining member scope and current consent checks;
+  do not issue a credential, register another device or infer controller rights.
+
+- Correlate SMART issuance through the signed response's request identifier
+  and thread while validating the JWT's independent token identifier. Preserve
+  pinned keys, signatures, issuer, audience, actor, time and scope checks.
+
+- Add optional encrypted-host checkpoint persistence to device enrollment.
+  Save the exact operation and custody binding before submission; recover an
+  uncertain acknowledgement by polling that operation, preserving both device
+  keys and the existing installation. Consumed or unavailable results require
+  explicit recovery instead of another registration.
+
+- Accept governed research and emergency ISCO-08 occupations in workforce
+  provisioning and recipient enrollment, using the shared classification
+  catalogue. Preserve current contact, role, device and licence bindings;
+  unknown codes and unrelated namespaces remain invalid.
+
+- Include the owned public KEM reply key in the protected transport header and
+  bind its existing thumbprint in the inner signed header. Preserve key
+  derivation and custody while allowing the gateway to validate the intended
+  encrypted response recipient before device registration.
 
 ## 0.5.5
 

@@ -8,6 +8,8 @@ import {createEmployeeActivationGrant} from '../dist/employee-activation-grant.j
 import {buildOrganizationEmployeeDidWeb} from 'antifraud-data-utils-ts/organization-identity'
 import {SchemaOrgPersonClaim as Person,SchemaOrgIndividualProductClaim as Product} from 'antifraud-data-utils-ts/schema-org-claims'
 import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
+import {MultichannelPermissionRoleClaims} from 'sos-data-utils-ts/multichannel-permission-forms'
+import {Isco08Occupations} from 'antifraud-data-utils-ts'
 import {GatewayResponseEntryTypes} from 'sos-data-utils-ts/gateway-response-contract'
 import {REPOSITORY_SAFE_EXAMPLES as safe} from 'sos-data-utils-ts/repository-privacy'
 
@@ -20,15 +22,15 @@ const phone={contactKind:'phone',contact:safe.phoneE164},email={contactKind:'ema
 const adapter={gatewayDid:providerDid,pack:async message=>JSON.stringify(message),unpackVerified:async packed=>JSON.parse(packed)}
 const options=baseUrl=>({baseUrl,ctx,providerDid,tenantIssuer,gatewayDid:providerDid,dcrResponseIssuer:gatewayDid,issuerDid:controllerDid,
  bearerToken:'synthetic-verified-controller-token',clientId:'registered-controller-client',transportProfile:'registered-didcomm-encrypted',secureTransportAdapter:adapter})
-const employeeDid=contact=>buildOrganizationEmployeeDidWeb({...contact,organizationDidWeb:providerDid,role})
-const contactClaims=contact=>({[contact.contactKind==='phone'?Person.Telephone:Person.Email]:contact.contact,[Person.HasOccupation]:role})
+const employeeDid=(contact,selectedRole=role)=>buildOrganizationEmployeeDidWeb({...contact,organizationDidWeb:providerDid,role:selectedRole})
+const contactClaims=(contact,selectedRole=role)=>({[contact.contactKind==='phone'?Person.Telephone:Person.Email]:contact.contact,[Person.HasOccupation]:selectedRole})
 const envelope=(message,iss,rows)=>({iss,aud:message.iss,thid:message.thid,body:{data:rows}})
-const employeeRow=contact=>({type:'Employee-form-v1.0',response:{status:'201'},resource:{id:safe.resourceUuid,type:'Person',
- meta:{claims:{...contactClaims(contact),[Person.Identifier]:employeeDid(contact),[Person.SameAs]:employeeDid(contact)}},
- contained:[{id:safe.demoOrganizationUuids.healthCare,type:'Occupation',meta:{claims:{[Person.HasOccupation]:role}}}]}})
-const licenseRow=contact=>({type:GatewayResponseEntryTypes.LicenseIssued,response:{status:'201'},meta:{subjectId:safe.resourceUuid,
- subjectDid:employeeDid(contact),licenseId:'synthetic-seat',maxDevices:1},resource:{resourceType:'OperationOutcome',
- meta:{claims:{...contactClaims(contact),[Product.SerialNumber]:'synthetic-activation-code'}}}})
+const employeeRow=(contact,selectedRole=role)=>({type:'Employee-form-v1.0',response:{status:'201'},resource:{id:safe.resourceUuid,type:'Person',
+ meta:{claims:{...contactClaims(contact,selectedRole),[Person.Identifier]:employeeDid(contact,selectedRole),[Person.SameAs]:employeeDid(contact,selectedRole)}},
+ contained:[{id:safe.demoOrganizationUuids.healthCare,type:'Occupation',meta:{claims:{[Person.HasOccupation]:selectedRole}}}]}})
+const licenseRow=(contact,selectedRole=role)=>({type:GatewayResponseEntryTypes.LicenseIssued,response:{status:'201'},meta:{subjectId:safe.resourceUuid,
+ subjectDid:employeeDid(contact,selectedRole),licenseId:'synthetic-seat',maxDevices:1},resource:{resourceType:'OperationOutcome',
+ meta:{claims:{...contactClaims(contact,selectedRole),[Product.SerialNumber]:'synthetic-activation-code'}}}})
 const {publicKey:actorPublicKey}=generateKeyPairSync('ec',{namedCurve:'secp384r1'})
 const actorSigningJwk={...actorPublicKey.export({format:'jwk'}),alg:'ES384',kid:'synthetic-actor-signing',use:'sig'}
 async function serve(handler,run){
@@ -42,8 +44,8 @@ async function serve(handler,run){
 }
 function reply(res,message){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({response:JSON.stringify(message)}))}
 
-for(const contact of [phone,email])test(`provisions the exact ${contact.contactKind} employee before its separately bound seat`,async()=>{
- const messages=[]
+for(const {contact,selectedRole} of [{contact:phone,selectedRole:role},{contact:email,selectedRole:role},{contact:email,selectedRole:MultichannelPermissionRoleClaims.Researcher},{contact:phone,selectedRole:`ISCO-08|${Isco08Occupations.Firefighter.code}`}])test(`provisions canonical ${selectedRole} for exact ${contact.contactKind} employee before its separately bound seat`,async()=>{
+ const role=selectedRole,messages=[]
  await serve(async(req,res,message)=>{
   messages.push({path:req.url,message})
   assert.equal(req.headers.authorization,'Bearer synthetic-verified-controller-token')
@@ -58,15 +60,15 @@ for(const contact of [phone,email])test(`provisions the exact ${contact.contactK
    }else{
     const entry=message.body.data[0]
     assert.equal(entry.meta.subjectId,safe.resourceUuid)
-    assert.equal(entry.meta.subjectDid,employeeDid(contact))
+    assert.equal(entry.meta.subjectDid,employeeDid(contact,role))
    }
    res.writeHead(202,{'content-type':'application/json'});res.end('{}');return
   }
-  reply(res,envelope(message,req.url.includes('/Employee/')?tenantIssuer:providerDid,[req.url.includes('/Employee/')?employeeRow(contact):licenseRow(contact)]))
+  reply(res,envelope(message,req.url.includes('/Employee/')?tenantIssuer:providerDid,[req.url.includes('/Employee/')?employeeRow(contact,role):licenseRow(contact,role)]))
  },async baseUrl=>{
   const result=await new WorkforceClient(options(baseUrl)).provisionEmployee({operationId:safe.resourceUuid,contact,role},{intervalMs:0})
   assert.equal(result.employeeResourceId,safe.resourceUuid)
-  assert.equal(result.employeeDid,employeeDid(contact))
+  assert.equal(result.employeeDid,employeeDid(contact,role))
   assert.equal(result.activationCode,'synthetic-activation-code')
   assert.equal(messages.length,4)
   assert.match(messages[0].path,/\/entity\/org.schema\/Employee\/_batch$/u)
@@ -113,9 +115,9 @@ test('rejects changing the grant role while retaining the dentist actor before a
  assert.equal(calls,0)
 })
 
-for(const {includeActorSigning,loopback,omitManagementToken=false,registrationManagementToken='synthetic-registration-token',malformed=false} of [{includeActorSigning:false,loopback:false},{includeActorSigning:true,loopback:false},{includeActorSigning:true,loopback:true},{includeActorSigning:true,loopback:false,omitManagementToken:true},{includeActorSigning:true,loopback:false,registrationManagementToken:'',malformed:true},{includeActorSigning:true,loopback:false,registrationManagementToken:42,malformed:true}])test(`recipient registers exact actor/profile keys without Employee mutation; actor-signing=${includeActorSigning}; loopback=${loopback}; optional-RAT-absent=${omitManagementToken}; malformed=${malformed}; token-type=${typeof registrationManagementToken}`,async()=>{
- const messages=[]
- const grant=createEmployeeActivationGrant({...phone,employeeDid:employeeDid(phone),employeeRoleCode:role,providerDid,routeContext:ctx,
+for(const {includeActorSigning,loopback,omitManagementToken=false,registrationManagementToken='synthetic-registration-token',malformed=false,selectedRole=role} of [{includeActorSigning:false,loopback:false},{includeActorSigning:true,loopback:false},{includeActorSigning:true,loopback:true},{includeActorSigning:true,loopback:false,omitManagementToken:true},{includeActorSigning:true,loopback:false,registrationManagementToken:'',malformed:true},{includeActorSigning:true,loopback:false,registrationManagementToken:42,malformed:true},{includeActorSigning:true,loopback:false,selectedRole:MultichannelPermissionRoleClaims.Researcher},{includeActorSigning:true,loopback:false,selectedRole:`ISCO-08|${Isco08Occupations.Firefighter.code}`}])test(`recipient ${selectedRole} registers exact actor/profile keys without Employee mutation; actor-signing=${includeActorSigning}; loopback=${loopback}; optional-RAT-absent=${omitManagementToken}; malformed=${malformed}; token-type=${typeof registrationManagementToken}`,async()=>{
+ const role=selectedRole,messages=[]
+ const grant=createEmployeeActivationGrant({...phone,employeeDid:employeeDid(phone,role),employeeRoleCode:role,providerDid,routeContext:ctx,
   createdAt:new Date(),expiresAt:new Date(Date.now()+60000)})
  const publicJwks=[{kty:'AKP',alg:'ML-DSA-44',kid:'synthetic-signing',pub:'synthetic-public-signing'},
   {kty:'OKP',crv:'ML-KEM-768',kid:'synthetic-encryption',x:'synthetic-public-encryption'},...(includeActorSigning?[actorSigningJwk]:[])]
@@ -196,3 +198,11 @@ test('rejects duplicate key IDs, private or symmetric material and ungoverned ad
   assert.equal(calls,0)
  }
 })
+
+for(const invalidRole of ['ISCO-08|9999','unsupported|2131','ISCO-08|2131|extra','ISCO-08|x2131'])test(`denies ungoverned workforce role ${invalidRole} before transport`,async()=>{
+ let calls=0;const client=new WorkforceClient({...options('http://127.0.0.1:1'),fetchImpl:async()=>{calls++;throw new Error('unexpected request')}});
+ await assert.rejects(client.provisionEmployee({operationId:safe.resourceUuid,contact:email,role:invalidRole}),/workforce_role_invalid/u);assert.equal(calls,0);
+ const grant=createEmployeeActivationGrant({...email,employeeDid:employeeDid(email,invalidRole),employeeRoleCode:invalidRole,providerDid,routeContext:ctx,createdAt:new Date(),expiresAt:new Date(Date.now()+60000)});
+ const recipient=new WorkforceClient({...options('http://127.0.0.1:1'),clientId:undefined,tenantIssuer:undefined,transportProfile:'pre-dcr-didcomm-encrypted',issuerDid:grant.employeeDid,fetchImpl:async()=>{calls++;throw new Error('unexpected request')}});
+ await assert.rejects(recipient.enrollEmployeeDevice({grant,verifiedContact:email,activationCode:'synthetic-activation-code',clientInstanceId:'synthetic-installation',publicJwks:[],redirectUris:['https://example.invalid/auth']}),/workforce_recipient_grant_invalid/u);assert.equal(calls,0);
+});

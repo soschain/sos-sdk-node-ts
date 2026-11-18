@@ -1,5 +1,6 @@
 import {createHash,createPublicKey,randomBytes,randomUUID,verify} from 'node:crypto'
 import {CryptographyService,type PublicJwk} from 'antifraud-data-utils-ts/cryptography'
+import {ActorKinds} from 'antifraud-data-utils-ts/actor-kinds'
 import {normalizeUuid} from 'antifraud-data-utils-ts/organization-identity'
 import {CompositionAttesterModes} from 'fhir-data-utils-ts'
 import type {RegisteredProfileBinding,RegisteredProfileRecord,RegisteredProfileSessionRecord,RegisteredProfileAuthorizedSubject,RegisteredProfileAttester} from 'sos-data-utils-ts/registered-profile-contract'
@@ -60,7 +61,7 @@ function scope(value:string,subject:string){
 }
 
 /**
- * Host-only registered individual-controller use case. Directory discovery is
+ * Host-only registered individual-controller and existing-member use case. Directory discovery is
  * not Consent: only a separately verified SMART grant can populate a selected
  * clinical session. Authentication/contact verification remain host duties.
  */
@@ -85,8 +86,12 @@ export class RegisteredProfileAccess{
   if(!/^[-a-zA-Z0-9]+$/u.test(tenantId)||!/^\p{L}{2}(?:-[A-Za-z0-9]{1,3})?$/u.test(jurisdiction)||!/^[-a-z0-9]+$/u.test(sector))throw denied()
   return `/${tenantId}/cds-${jurisdiction}/v1/${sector}`
  }
+ private supported(profile:RegisteredProfileRecord):boolean{
+  return (profile.actorKind===ActorKinds.IndividualController&&['self','controller'].includes(profile.actorMode))
+   ||(profile.actorKind===ActorKinds.IndividualMember&&profile.actorMode==='member'&&!!profile.protectedVpToken)
+ }
  private admit(profile:RegisteredProfileRecord){
-  if(profile.actorKind!=='individual_controller'||!['self','controller'].includes(profile.actorMode))throw denied()
+  if(!this.supported(profile))throw denied()
   text(profile.clientId)
  }
  private profileView(profile:Profile,session?:Session):RegisteredProfileView{
@@ -107,7 +112,7 @@ export class RegisteredProfileAccess{
   const rows=await this.options.vault.query<Profile>(this.options.collections.profiles,{where:[{attribute:'ownerId',equals:input.ownerId},{attribute:'providerDid',equals:input.providerDid}]})
   return rows.flatMap(profile=>{
    if(profile.ownerId!==input.ownerId||profile.providerDid!==input.providerDid)throw denied()
-   if(!equal(profile.routeContext,input.routeContext)||profile.actorKind!=='individual_controller'||!['self','controller'].includes(profile.actorMode))return []
+   if(!equal(profile.routeContext,input.routeContext)||!this.supported(profile))return []
    this.admit(profile)
    const {publicJwks:_keys,storagePublicJwk:_storage,...metadata}=this.profileView(profile)
    return [metadata]
@@ -216,7 +221,7 @@ export class RegisteredProfileAccess{
   await this.commit(opened,{...rest,authorizedSubjects:assignments,authorizedSubjectDids,scopes:[]},{...opened.profile,allowedSubjectDids:authorizedSubjectDids,updatedAt:this.now().toISOString()})
   return {session:await this.resolveActorSession(input),subjects}
  }
- private async token(compact:string,opened:Opened,jti:string,patient:string,requested:readonly string[],body:Record<string,unknown>){
+ private async token(compact:string,opened:Opened,patient:string,requested:readonly string[],body:Record<string,unknown>){
   const parts=text(compact).split('.')
   if(parts.length!==3||parts.some(part=>!part||!/^[A-Za-z0-9_-]+$/u.test(part)))throw denied()
   const policy=this.options.gateway.smartTokenVerification
@@ -230,7 +235,8 @@ export class RegisteredProfileAccess{
    if(!verify(policy.algorithm==='ES384'?'sha384':'sha256',Buffer.from(`${parts[0]}.${parts[1]}`,'ascii'),{key:ec,dsaEncoding:'ieee-p1363'},Buffer.from(parts[2]!,'base64url')))throw denied()
   }else if(key.kty!=='AKP'||key.alg!==policy.algorithm||!await this.crypto.verifyJws(compact,key))throw denied()
   const claims=record(JSON.parse(Buffer.from(parts[1]!,'base64url').toString('utf8'))),now=Math.floor(this.now().getTime()/1000)
-  if(claims.iss!==opened.profile.providerDid||claims.aud!==opened.profile.providerDid||claims.sub!==opened.profile.actorDid||claims.jti!==jti||!Number.isSafeInteger(claims.exp)||Number(claims.exp)<=now)throw new Error('registered_profile_access_token_expired_or_binding_invalid')
+  text(claims.jti)
+  if(claims.iss!==opened.profile.providerDid||claims.aud!==opened.profile.providerDid||claims.sub!==opened.profile.actorDid||!Number.isSafeInteger(claims.exp)||Number(claims.exp)<=now)throw new Error('registered_profile_access_token_expired_or_binding_invalid')
   if(!Number.isSafeInteger(claims.iat)||Number(claims.iat)>now||(claims.nbf!==undefined&&(!Number.isSafeInteger(claims.nbf)||Number(claims.nbf)>now)))throw denied()
   if(body.subject!==patient||body.token_type!=='Bearer'||typeof body.scope!=='string'||claims.scope!==body.scope)throw denied()
   const grants=body.scope.split(/\s+/u).filter(Boolean)
@@ -242,14 +248,21 @@ export class RegisteredProfileAccess{
   const opened=await this.opened(input),assignment=opened.session.authorizedSubjects?.find(subject=>subject.subjectDid===input.subjectDid)
   if(!assignment?.transportSubjectDid||!opened.session.authorizedSubjectDids?.includes(input.subjectDid))throw denied()
   const patient=assignment.transportSubjectDid
+  let memberVp:string|undefined
+  if(opened.profile.actorKind===ActorKinds.IndividualMember){
+   if(assignment.actorMode!=='member'||!opened.profile.protectedVpToken||!opened.session.sealedUnlockedVpToken)throw denied()
+   memberVp=text(await this.options.sealer.unseal(opened.session.sealedUnlockedVpToken,`${input.sessionId}:unlocked-vp-token`))
+  }
   if(!Array.isArray(input.scopes)||!input.scopes.length)throw denied()
   const requested=input.scopes.map(value=>{const parsed=scope(text(value),input.subjectDid);return buildScopeSmartCompositionAccess({subjectDid:patient,sections:parsed.sections,accessVerb:parsed.head.endsWith('.cruds')?'cruds':parsed.head.endsWith('.rs')?'rs':'r'})})
   const path=`${this.route(input)}/identity/openid/smart/token`,audience=`${this.baseUrl}${path}`,operation=randomUUID()
   const assertion=await opened.custody.signClientAssertion({clientId:opened.profile.clientId,audience,issuedAt:Math.floor(this.now().getTime()/1000),jti:randomUUID()})
-  const message={thid:operation,jti:operation,iss:opened.profile.actorDid,aud:audience,client_id:opened.profile.clientId,body:{client_id:opened.profile.clientId,sub:opened.profile.actorDid,id_token:text(input.idToken),client_assertion:assertion,client_assertion_type:'private_key_jwt',acr_values:'urn:antifraud:acr:openid4vp:individual',purpose:'TREAT',scope:requested.join(' ')}}
+  const message={thid:operation,jti:operation,iss:opened.profile.actorDid,aud:audience,client_id:opened.profile.clientId,body:{client_id:opened.profile.clientId,sub:opened.profile.actorDid,id_token:text(input.idToken),...(memberVp?{vp_token:memberVp}:{}),client_assertion:assertion,client_assertion_type:'private_key_jwt',acr_values:'urn:antifraud:acr:openid4vp:individual',purpose:'TREAT',scope:requested.join(' ')}}
   const result=await(await this.transport(input,opened)).exchange(path,message,this.options.gateway.responseIssuer,this.options.pollOptions)
-  const body=record(record(result.poll.body).body),accessToken=text(body.access_token)
-  const validated=await this.token(accessToken,opened,operation,patient,requested,body)
+  const envelope=record(result.poll.body)
+  if(envelope.jti!==operation)throw denied()
+  const body=record(envelope.body),accessToken=text(body.access_token)
+  const validated=await this.token(accessToken,opened,patient,requested,body)
   const sealedAccessToken=await this.options.sealer.seal(accessToken,`${input.sessionId}:access-token`)
   const {attester:_oldAttester,...rest}=opened.session
   const updated={...rest,subjectDid:patient,selectedSubjectDid:input.subjectDid,scopes:validated.scopes,sealedAccessToken,actorMode:assignment.actorMode,...(assignment.attester?{attester:assignment.attester}:{})}
@@ -262,11 +275,11 @@ export class RegisteredProfileAccess{
   const assignment=session.authorizedSubjects.find(subject=>subject.subjectDid===session.selectedSubjectDid)
   if(!assignment||session.actorMode!==assignment.actorMode||!equal(session.attester,assignment.attester))throw denied()
   const accessToken=await this.options.sealer.unseal(session.sealedAccessToken,`${input.sessionId}:access-token`)
-  // The operation jti was verified before sealing; resolve re-verifies all
-  // currently available authority and time claims, not a fresh HTTP operation.
+  // The signed response correlated the original HTTP operation before sealing.
+  // The token has its own identifier; resolve re-verifies its current authority and time claims.
   const parts=accessToken.split('.');if(parts.length!==3)throw denied()
   const claims=record(JSON.parse(Buffer.from(parts[1]!,'base64url').toString('utf8')))
-  await this.token(accessToken,opened,text(claims.jti),session.subjectDid,session.scopes,{subject:session.subjectDid,scope:session.scopes.join(' '),token_type:'Bearer'})
+  await this.token(accessToken,opened,session.subjectDid,session.scopes,{subject:session.subjectDid,scope:session.scopes.join(' '),token_type:'Bearer'})
   await this.commit(opened)
   return {sessionId:input.sessionId,profile:this.profileView(opened.profile,session),subjectDid:session.subjectDid,selectedSubjectDid:session.selectedSubjectDid,actorMode:session.actorMode??opened.profile.actorMode,scopes:[...session.scopes],accessToken,...(session.attester?{attester:session.attester}:{}),...await this.capabilities(input,opened,Number(claims.exp))}
  }

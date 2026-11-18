@@ -51,9 +51,9 @@ export class OrganizationRegistrationWallet {
     const keys=this.requireKeys(context)
     const recipient=await this.options.resolveRecipientJwk?.(recipientDid)
     if(!recipient||recipient.kty!=='OKP'||!['ML-KEM-512','ML-KEM-768','ML-KEM-1024'].includes(String(recipient.crv))||typeof recipient.x!=='string'||'d' in recipient||'dBytes' in recipient)throw new Error('registration_recipient_encryption_key_invalid')
-    const jws=await this.cryptography.signDataJws(content,{alg:'ML-DSA-44',kid:keys.signing.kid,typ:'JWS',...(bootstrap?{jwk:keys.signing}:{})},keys.signingSecret)
+    const jws=await this.cryptography.signDataJws(content,{alg:'ML-DSA-44',kid:keys.signing.kid,skid:keys.encryption.kid,typ:'JWS',...(bootstrap?{jwk:keys.signing}:{})},keys.signingSecret)
     const compact=`${jws.protected}.${jws.payload}.${jws.signature}`
-    return this.cryptography.encryptJweToCompact(compact,{enc:'A256GCM',skid:keys.encryption.kid,cty:'JWS'},{...keys.encryption,dBytes:keys.encryptionSecret},recipient as unknown as MlkemPublicJwk)
+    return this.cryptography.encryptJweToCompact(compact,{enc:'A256GCM',skid:keys.encryption.kid,cty:'JWS',jwk:keys.encryption},{...keys.encryption,dBytes:keys.encryptionSecret},recipient as unknown as MlkemPublicJwk)
   }
   async unpackWithContext(packed:string,options:Readonly<{context:RegistrationWalletContext}>):Promise<Readonly<{content:unknown;meta:Record<string,unknown>}>>{
     const keys=this.requireKeys(options.context)

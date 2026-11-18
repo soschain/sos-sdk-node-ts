@@ -3,6 +3,7 @@ import {DeviceEnrollmentClient,DeviceEnrollmentSubmitError} from './device-enrol
 import {buildOrganizationEmployeeDidWeb,buildStableActorIdentifier,normalizeActorContact,normalizeUuid,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
 import {SchemaOrgPersonClaim as Person,SchemaOrgIndividualProductClaim as Product,SchemaOrgOfferClaim as Offer,SchemaOrgOrganizationClaim as Organization,SchemaOrgOrderClaim as Order} from 'antifraud-data-utils-ts/schema-org-claims'
 import {getHealthcareRoleByClaim} from 'sos-data-utils-ts/healthcare-roles'
+import {readIsco08Code,findIsco08Occupation} from 'antifraud-data-utils-ts'
 import {GatewayResponseEntryTypes} from 'sos-data-utils-ts/gateway-response-contract'
 import type {AppInfo,PollOptions,RouteContext} from 'sos-data-utils-ts/gateway-transport-contract'
 import type {EmployeeActivationGrant} from 'sos-data-utils-ts/employee-routing'
@@ -60,6 +61,10 @@ function workflowEntries(resourceType:'Group'|'Consent',input:readonly Organizat
   }
  }
  return input.map(entry=>structuredClone(entry))
+}
+/** Vocabulary validation only; current controller, sector, licence and access authority remain server-owned. */
+function governedWorkforceRole(role:string):boolean{
+ return !!getHealthcareRoleByClaim(role)||!!findIsco08Occupation(readIsco08Code(role))
 }
 function canonicalContact(contact:ActorContactInput):ActorContactInput{return {contactKind:contact.contactKind,contact:normalizeActorContact(contact)}}
 function contactClaims(contact:ActorContactInput):Row{return {[contact.contactKind==='phone'?Person.Telephone:Person.Email]:contact.contact}}
@@ -269,7 +274,7 @@ export class WorkforceClient{
   const operationId=requireText(input.operationId,'workforce_operation_id_required')
   if(!normalizeUuid(operationId))throw new TypeError('workforce_operation_uuid_required')
   const contact=canonicalContact(input.contact),role=requireText(input.role,'workforce_role_required')
-  if(!getHealthcareRoleByClaim(role))throw new TypeError('workforce_role_invalid')
+  if(!governedWorkforceRole(role))throw new TypeError('workforce_role_invalid')
   const employeeDid=buildOrganizationEmployeeDidWeb({...contact,organizationDidWeb:this.options.providerDid,role})
   const requestedClaims={...contactClaims(contact),[Person.Identifier]:employeeDid,[Person.SameAs]:employeeDid,[Person.HasOccupation]:role}
   const employee=await this.transport.exchange(`${this.prefix}/entity/org.schema/Employee/_batch`,this.message({resourceType:'Bundle',type:'batch',data:[{
@@ -308,7 +313,7 @@ export class WorkforceClient{
   if(!employeeActivationGrantMatchesContact(grant,input.verifiedContact))throw new Error('workforce_recipient_contact_binding_invalid')
   if(grant.providerDid!==this.options.providerDid||grant.employeeDid!==this.options.issuerDid
    ||(['tenantId','jurisdiction','sector'] as const).some(key=>grant.routeContext[key]!==this.options.ctx[key]))throw new Error('workforce_recipient_route_binding_invalid')
-  if(!getHealthcareRoleByClaim(grant.employeeRoleCode)||!Number.isFinite(Date.parse(grant.expiresAt))||Date.parse(grant.expiresAt)<=Date.now())throw new Error('workforce_recipient_grant_invalid')
+  if(!governedWorkforceRole(grant.employeeRoleCode)||!Number.isFinite(Date.parse(grant.expiresAt))||Date.parse(grant.expiresAt)<=Date.now())throw new Error('workforce_recipient_grant_invalid')
   if(buildOrganizationEmployeeDidWeb({...input.verifiedContact,organizationDidWeb:grant.providerDid,role:grant.employeeRoleCode})!==grant.employeeDid)throw new Error('workforce_recipient_role_binding_invalid')
   try{
    const result=await new DeviceEnrollmentClient({...this.options,transportProfile:'pre-dcr-didcomm-encrypted',

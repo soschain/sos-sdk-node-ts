@@ -1,6 +1,6 @@
-import {randomUUID} from 'node:crypto'
+import {createHash,randomUUID} from 'node:crypto'
 import {buildStableActorIdentifier,normalizeActorContact,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
-import type {AppInfo,PollOptions,RouteContext} from 'sos-data-utils-ts/gateway-transport-contract'
+import type {AppInfo,PollOptions,RouteContext,SubmitAndPollResult} from 'sos-data-utils-ts/gateway-transport-contract'
 import {RegisteredGatewayTransport,gatewayResponseEntries,type VerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
 import type {ServerProfileKeyDescriptor} from './server-profile-custody-keys.js'
 type Row=Record<string,unknown>
@@ -73,6 +73,39 @@ export type DeviceEnrollmentInput=Readonly<{
  publicJwks:readonly Readonly<Row>[];redirectUris:readonly string[]
  enrollmentKeyDescriptors?:readonly ServerProfileKeyDescriptor[]
 }>
+type EnrollmentOperation=Readonly<{jti:string;thid:string}>
+export type DeviceEnrollmentOperationResult=Readonly<{
+ submit?:SubmitAndPollResult['submit'];poll:SubmitAndPollResult['poll']
+}>
+/** Sensitive trusted-server state: seal with the same owner/profile-bound enrollment grant. */
+export type DeviceEnrollmentCheckpoint=Readonly<{
+ version:1;bindingDigest:string;phase:'token-pending'|'token-complete'|'registration-pending'|'complete'
+ tokenOperation:EnrollmentOperation;registrationOperation:EnrollmentOperation
+ tokenResult?:DeviceEnrollmentOperationResult;registrationResult?:DeviceEnrollmentOperationResult
+}>
+export type DeviceEnrollmentContinuation=Readonly<{
+ checkpoint?:DeviceEnrollmentCheckpoint
+ saveCheckpoint:(checkpoint:DeviceEnrollmentCheckpoint)=>Promise<void>
+}>
+export type DeviceEnrollmentResult=Readonly<{
+ token:DeviceEnrollmentOperationResult;registration:DeviceEnrollmentOperationResult
+ clientId:string;actorDid:string;profileDid:string;routeContext:RouteContext
+}>
+export class DeviceEnrollmentRecoveryRequiredError extends Error{
+ constructor(prefix='device_enrollment'){super(prefix+'_recovery_required');this.name='DeviceEnrollmentRecoveryRequiredError'}
+}
+function snapshot<T>(value:T):T{return structuredClone(value)}
+function checkpointValue(value:unknown,prefix:string):DeviceEnrollmentCheckpoint{
+ const state=record(value),operation=(value:unknown,kind:string)=>{
+  const row=record(value),uuid='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
+  return !!row&&new RegExp('^'+uuid+'$','u').test(text(row.jti))&&new RegExp('^device-'+kind+'-'+uuid+'$','u').test(text(row.thid))
+ }
+ if(!state||state.version!==1||!['token-pending','token-complete','registration-pending','complete'].includes(text(state.phase))
+  ||!/^[0-9a-f]{64}$/u.test(text(state.bindingDigest))||!operation(state.tokenOperation,'token')||!operation(state.registrationOperation,'dcr')
+  ||(state.phase!=='token-pending'&&!record(record(state.tokenResult)?.poll))
+  ||(state.phase==='complete'&&!record(record(state.registrationResult)?.poll)))throw new TypeError(prefix+'_checkpoint_invalid')
+ return snapshot(state) as DeviceEnrollmentCheckpoint
+}
 export class DeviceEnrollmentSubmitError extends Error{
  constructor(readonly status:number,readonly body:unknown,prefix='device_enrollment'){super(prefix+'_gateway_failed:'+status)}
 }
@@ -97,10 +130,12 @@ export class DeviceEnrollmentClient{
   this.prefix='/'+encodeURIComponent(tenantId)+'/cds-'+encodeURIComponent(jurisdiction)+'/v1/'+encodeURIComponent(sector)
   this.transport=new RegisteredGatewayTransport({...this.options,baseUrl:url.href.replace(/\/+$/u,''),errorPrefix:prefix,submitError:(status,body)=>new DeviceEnrollmentSubmitError(status,body,prefix)})
  }
- private message(body:unknown,thread:string,type='application/didcomm-plain+json'):Row{
-  return {jti:randomUUID(),thid:thread,iss:this.options.expectedProfile.actorDid,aud:this.options.providerDid,type,body}
+ private message(body:unknown,thread:string,type='application/didcomm-plain+json',jti:string=randomUUID()):Row{
+  return {jti,thid:thread,iss:this.options.expectedProfile.actorDid,aud:this.options.providerDid,type,body}
  }
- async enroll(input:DeviceEnrollmentInput,pollOptions?:PollOptions){
+ async enroll(input:DeviceEnrollmentInput,pollOptions?:PollOptions):Promise<DeviceEnrollmentResult & {token:SubmitAndPollResult;registration:SubmitAndPollResult}>
+ async enroll(input:DeviceEnrollmentInput,pollOptions:PollOptions|undefined,continuation:DeviceEnrollmentContinuation):Promise<DeviceEnrollmentResult>
+ async enroll(input:DeviceEnrollmentInput,pollOptions?:PollOptions,continuation?:DeviceEnrollmentContinuation):Promise<DeviceEnrollmentResult>{
   const prefix=this.errorPrefix
   if(buildStableActorIdentifier(input.verifiedContact)!==buildStableActorIdentifier(this.options.expectedProfile.contact))throw new Error(prefix+'_recipient_contact_binding_invalid')
   const activationCode=required(input.activationCode,prefix+'_activation_code_required'),clientInstanceId=required(input.clientInstanceId,prefix+'_installation_required')
@@ -111,18 +146,50 @@ export class DeviceEnrollmentClient{
    return !allowed||!!parsed.username||!!parsed.password||!!parsed.hash
   }catch{return true}}))throw new TypeError(prefix+'_device_redirects_invalid')
   const redirectUris=[...input.redirectUris]
-  const token=await this.transport.exchange(this.prefix+'/identity/openid/Token/_exchange',this.message({
-   grant_type:'urn:ietf:params:oauth:grant-type:token-exchange',subject_token:activationCode,client_instance_id:clientInstanceId,
-  },'device-token-'+randomUUID()),this.options.providerDid,pollOptions)
+  // Include all six custody descriptors, but never persist a bearer identity token.
+  const bindingDigest=createHash('sha256').update(JSON.stringify([
+   this.options.baseUrl,this.options.ctx,this.options.providerDid,this.options.gatewayDid,this.options.dcrResponseIssuer,
+   this.options.expectedProfile.actorDid,this.options.expectedProfile.profileDid,buildStableActorIdentifier(input.verifiedContact),
+   activationCode,clientInstanceId,publicJwks.map(key=>keyMaterial(key)),
+   input.enrollmentKeyDescriptors?.map(descriptor=>[descriptor.purpose,descriptor.ownerScope,descriptor.kid,descriptor.alg,descriptor.use,keyMaterial(publicKeySnapshot(descriptor.publicJwk,prefix))]),redirectUris,
+  ])).digest('hex')
+  if(continuation&&typeof continuation.saveCheckpoint!=='function')throw new TypeError(prefix+'_checkpoint_persistence_required')
+  let state=continuation?.checkpoint===undefined?undefined:checkpointValue(continuation.checkpoint,prefix)
+  if(state&&state.bindingDigest!==bindingDigest)throw new Error(prefix+'_checkpoint_binding_invalid')
+  const resumed=!!state
+  const save=async(next:DeviceEnrollmentCheckpoint)=>{
+   await continuation!.saveCheckpoint(snapshot(next));state=snapshot(next)
+  }
+  if(continuation&&!state)await save({version:1,bindingDigest,phase:'token-pending',
+   tokenOperation:{jti:randomUUID(),thid:'device-token-'+randomUUID()},registrationOperation:{jti:randomUUID(),thid:'device-dcr-'+randomUUID()}})
+  const tokenMessage=this.message({grant_type:'urn:ietf:params:oauth:grant-type:token-exchange',subject_token:activationCode,client_instance_id:clientInstanceId},
+   state?.tokenOperation.thid??'device-token-'+randomUUID(),'application/didcomm-plain+json',state?.tokenOperation.jti)
+  const resumePoll=async(path:string,message:Row,issuer:string,bearerToken?:string):Promise<DeviceEnrollmentOperationResult>=>{
+   try{return {poll:await this.transport.poll(path,message,issuer,pollOptions,bearerToken)}}
+   catch{throw new DeviceEnrollmentRecoveryRequiredError(prefix)}
+  }
+  const token:DeviceEnrollmentOperationResult=state?.tokenResult??(resumed
+   ?await resumePoll(this.prefix+'/identity/openid/Token/_exchange',tokenMessage,this.options.providerDid)
+   :await this.transport.exchange(this.prefix+'/identity/openid/Token/_exchange',tokenMessage,this.options.providerDid,pollOptions))
   const tokenBody=record(record(token.poll.body)?.body),initialAccessToken=text(tokenBody?.initial_access_token)
   if(!initialAccessToken||tokenBody?.token_type!=='Bearer'||tokenBody.scope!=='dcr:register'||!Number.isFinite(tokenBody.expires_in)||Number(tokenBody.expires_in)<=0)throw new Error(prefix+'_initial_access_token_invalid')
-  const registration=await this.transport.exchange(this.prefix+'/identity/openid/Device/_dcr',this.message({
+  if(state?.phase==='token-pending')await save({...state,phase:'token-complete',tokenResult:token})
+  const registrationMessage=this.message({
    code:activationCode,redirect_uris:redirectUris,jwks:{keys:publicJwks},application_type:'web',token_endpoint_auth_method:'private_key_jwt',
    actor_did:this.options.expectedProfile.actorDid,profile_did:this.options.expectedProfile.profileDid,ext_device_info:{device_id:clientInstanceId},
-  },'device-dcr-'+randomUUID(),'openid-dcr-request'),this.options.dcrResponseIssuer,pollOptions,initialAccessToken)
+  },state?.registrationOperation.thid??'device-dcr-'+randomUUID(),'openid-dcr-request',state?.registrationOperation.jti)
+  const registrationPending=state?.phase==='registration-pending'
+  let registration:DeviceEnrollmentOperationResult
+  if(state?.registrationResult)registration=state.registrationResult
+  else if(registrationPending)registration=await resumePoll(this.prefix+'/identity/openid/Device/_dcr',registrationMessage,this.options.dcrResponseIssuer,initialAccessToken)
+  else{
+   if(state)await save({...state,phase:'registration-pending'})
+   registration=await this.transport.exchange(this.prefix+'/identity/openid/Device/_dcr',registrationMessage,this.options.dcrResponseIssuer,pollOptions,initialAccessToken)
+  }
   const rows=gatewayResponseEntries(registration.poll.body),devices=rows.filter(row=>record(row.resource)?.resourceType==='Device'&&['200','201'].includes(String(record(row.response)?.status)))
   const device=record(devices[0]?.resource),clientId=text(device?.client_id)
   if(devices.length!==1||!device||!clientId||device.id!==clientId||(Object.hasOwn(device,'registration_access_token')&&!text(device.registration_access_token))||!text(device.registration_client_uri))throw new Error(prefix+'_device_registration_binding_invalid')
+  if(state&&state.phase!=='complete')await save({...state,phase:'complete',registrationResult:registration})
   return {token,registration,clientId,actorDid:this.options.expectedProfile.actorDid,profileDid:this.options.expectedProfile.profileDid,routeContext:this.options.ctx}
  }
 }
