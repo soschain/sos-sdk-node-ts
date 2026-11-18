@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 - Add explicit Demo signing-realm constructors for ordinary SHCs and the
   separate post-quantum companion. Share the demonstration signer across
