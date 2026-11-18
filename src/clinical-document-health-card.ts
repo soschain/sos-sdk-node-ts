@@ -2,7 +2,8 @@ import {createHash,createPrivateKey,createPublicKey,generateKeyPairSync,sign,ver
 import {inflateRawSync} from 'node:zlib'
 import {validateR4DocumentBundleStructure} from 'fhir-data-utils-ts'
 import {prepareSmartHealthCard,assembleSmartHealthCardJws} from 'sos-data-utils-ts'
-import {encodeSoschainSmartHealthCardQr,decodeSoschainSmartHealthCardQr} from 'sos-data-utils-ts/clinical-document-shc'
+import {encodeSoschainSmartHealthCardQr} from 'sos-data-utils-ts/clinical-document-shc'
+import {clinicalDocumentCompactInput} from './clinical-document-credential-input.js'
 import {FhirIpsCreatorKinds,type ClinicalCreatorBinding} from 'sos-data-utils-ts/clinical-creator-contract'
 import {HealthcareActorRoles,getHealthcareRoleByClaim} from 'sos-data-utils-ts/healthcare-roles'
 import {normalizeClinicalCreatorBinding} from 'sos-sdk-core-ts/clinical-creator'
@@ -156,22 +157,8 @@ function validateKey(value:RecordValue):PublicKey {
   try{if(base64(value.x).length!==32||base64(value.y).length!==32||thumbprint(value)!==value.kid)fail('key_invalid');createPublicKey({key:value,format:'jwk'})}catch{fail('key_invalid')}
   return{kty:'EC',crv:'P-256',x:value.x,y:value.y,kid:value.kid,alg:'ES256',use:'sig'}
 }
-function compactInput(input:string|readonly string[]):string {
-  if(Array.isArray(input)){
-    if(!input.length||input.length>100||input.some(v=>typeof v!=='string')||input.reduce((n,v)=>n+v.length,0)>maxInput)fail('credential_invalid')
-    try{return decodeSoschainSmartHealthCardQr(input)}catch{fail('credential_invalid')}
-  }
-  if(typeof input!=='string'||Buffer.byteLength(input)>maxInput)fail('credential_invalid')
-  if(input.startsWith('shc:/')){try{return decodeSoschainSmartHealthCardQr([input])}catch{fail('credential_invalid')}}
-  if(input.startsWith('{')){
-    let wrapper:unknown;try{wrapper=JSON.parse(input)}catch{fail('credential_invalid')}
-    if(!record(wrapper)||!Array.isArray(wrapper.verifiableCredential)||wrapper.verifiableCredential.length!==1||typeof wrapper.verifiableCredential[0]!=='string'||wrapper.verifiableCredential[0].startsWith('{'))fail('credential_invalid')
-    return compactInput(wrapper.verifiableCredential[0])
-  }
-  return input
-}
 function parseCredential(input:string|readonly string[]):Readonly<{parts:readonly string[];header:RecordValue;payload:RecordValue;signature:Buffer}>{
-  const compact=compactInput(input)
+  const compact=clinicalDocumentCompactInput(input,()=>fail('credential_invalid'))
   if(Buffer.byteLength(compact)>maxInput)fail('credential_invalid')
   const parts=compact.split('.');if(parts.length!==3)fail('credential_invalid')
   let header:RecordValue,payload:RecordValue,signature:Buffer

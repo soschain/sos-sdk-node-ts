@@ -19,6 +19,8 @@ export type PortalClinicalDocumentVaultOptions=Readonly<{
  readerActorIdentifier?:string;authorizeOriginalRead?:PortalClinicalDocumentOriginalReaderOptions['authorizeOriginalRead']
  /** Current OWNER-LOCAL card/lifecycle and Consent reads use this same transaction before any write. Pro custody/workforce admission is checked separately by its owning host before/after peer transport. */
  authorize:(transaction:IVaultRepository,action:'read'|'write',documentReference:string)=>Promise<PortalClinicalDocumentAuthority>
+ /** Owner-local native section/resource permission check; injected hosts must inspect the actual original, never only its resource-type set. */
+ assertDocumentAccess?:(transaction:IVaultRepository,action:'read'|'write',document:Readonly<{documentReference:string;bundle:FhirBundle}>)=>Promise<void>
 }>
 type StoredDocument={id:string;kind:'document';scopeKey:string;subjectIdentifier:string;generationId:string;expiresAt:number;organizationReference:string;authorIdentifier:string;actorIdentifier:string;documentReference:string;revision:string;bundle:FhirBundle}
 type Receipt={id:string;kind:'operation';fingerprint:string;documentId:string;revision:string;bundle:FhirBundle;actorIdentifier:string}
@@ -72,7 +74,7 @@ export class PortalClinicalDocumentVaultProvider {
  }
  async readAuthorizedDocument(input:Readonly<{documentReference:string}>):Promise<AuthorizedClinicalDocument|undefined>{
   this.context(input.documentReference)
-  return this.options.store.runTransaction(async transaction=>{const authority=await this.authority(transaction,'read',input.documentReference),row=this.checkedStored(await transaction.get<StoredDocument>(this.collectionNames.documents,this.documentId(input.documentReference)),input.documentReference,authority);return row?this.snapshot(row,authority):undefined})
+  return this.options.store.runTransaction(async transaction=>{const authority=await this.authority(transaction,'read',input.documentReference),row=this.checkedStored(await transaction.get<StoredDocument>(this.collectionNames.documents,this.documentId(input.documentReference)),input.documentReference,authority);if(!row)return undefined;await this.options.assertDocumentAccess?.(transaction,'read',structuredClone({documentReference:row.documentReference,bundle:row.bundle}));return this.snapshot(row,authority)})
  }
  async saveDocument(command:PortalClinicalDocumentSave):Promise<AuthorizedClinicalDocument>{
   if(!command||!text(command.operationId)||Object.keys(command).some(key=>!['operationId','documentReference','expectedRevision','bundle'].includes(key))||command.expectedRevision!==undefined&&!/^[1-9]\d*$/u.test(command.expectedRevision))fail('request_invalid')
@@ -81,8 +83,10 @@ export class PortalClinicalDocumentVaultProvider {
    const authority=await this.authority(transaction,'write',command.documentReference)
    const current=this.checkedStored(await transaction.get<StoredDocument>(this.collectionNames.documents,documentId),command.documentReference,authority),receipt=await transaction.get<Receipt>(this.collectionNames.operations,operationId)
    this.checkBundle(copied.bundle,command.documentReference,authority)
-   if(receipt){if(receipt.kind!=='operation'||receipt.fingerprint!==fingerprint||receipt.documentId!==documentId||receipt.actorIdentifier!==authority.clinicalCreatorBinding.actorIdentifier)fail('idempotency_conflict');this.checkBundle(receipt.bundle,command.documentReference,authority);return this.snapshot({documentReference:command.documentReference,revision:receipt.revision,bundle:receipt.bundle},authority)}
+   if(receipt){if(receipt.kind!=='operation'||receipt.fingerprint!==fingerprint||receipt.documentId!==documentId||receipt.actorIdentifier!==authority.clinicalCreatorBinding.actorIdentifier)fail('idempotency_conflict');this.checkBundle(receipt.bundle,command.documentReference,authority);await this.options.assertDocumentAccess?.(transaction,'write',structuredClone({documentReference:command.documentReference,bundle:receipt.bundle}));return this.snapshot({documentReference:command.documentReference,revision:receipt.revision,bundle:receipt.bundle},authority)}
    if(current?command.expectedRevision!==current.revision:command.expectedRevision!==undefined)fail('revision_conflict')
+   if(current)await this.options.assertDocumentAccess?.(transaction,'write',structuredClone({documentReference:current.documentReference,bundle:current.bundle}))
+   await this.options.assertDocumentAccess?.(transaction,'write',structuredClone({documentReference:command.documentReference,bundle:copied.bundle}))
    const row:StoredDocument={id:documentId,kind:'document',scopeKey:this.options.scopeKey,subjectIdentifier:this.options.subjectIdentifier,generationId:this.options.generationId,expiresAt:this.options.expiresAt,organizationReference:this.options.organizationReference,authorIdentifier:this.options.authorIdentifier,actorIdentifier:authority.clinicalCreatorBinding.actorIdentifier,documentReference:command.documentReference,revision:String(Number(current?.revision??0)+1),bundle:copied.bundle}
    const operation:Receipt={id:operationId,kind:'operation',fingerprint,documentId,revision:row.revision,bundle:row.bundle,actorIdentifier:row.actorIdentifier}
    await transaction.put(this.collectionNames.documents,row);await transaction.put(this.collectionNames.operations,operation);return this.snapshot(row,authority)

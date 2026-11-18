@@ -7,6 +7,7 @@ import {CryptographyService,encodePostQuantumDetachedProofQr,decodePostQuantumDe
 import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
 import {FhirIpsCreatorKinds} from 'sos-data-utils-ts/clinical-creator-contract'
 import {REPOSITORY_SAFE_EXAMPLES as safe} from 'sos-data-utils-ts/repository-privacy'
+import {decodeSoschainSmartHealthCardQr} from 'sos-data-utils-ts/clinical-document-shc'
 
 const crypto=new CryptographyService({getRandomBytes:async n=>randomBytes(n),digestString:async(value,algorithm)=>createHash(algorithm.replaceAll('-','').toLowerCase()).update(value,'utf8').digest('hex'),randomUUID})
 const organization=`Organization/${safe.demoOrganizationUuids.healthCare}`,subject=`Patient/${safe.resourceUuid}`,documentReference=`Composition/${safe.resourceUuid}`,issuer=`${safe.httpsBaseUrl}/clinical-issuers/${safe.demoOrganizationUuids.healthCare}`
@@ -107,4 +108,41 @@ test('public proof JWKS projection is read-only before authorized issuance and n
  const f=fixture()
  assert.deepEqual(await f.service.publicProofJwks(issuer),{keys:[]})
  assert.equal(f.state.seeds.length,0);assert.deepEqual(await f.vault.query(collection,{}),[])
+})
+
+test('companion transport parity: a single numeric SHC QR verifies the proof over its exact compact bytes',async()=>{
+ const f=fixture(),card=await f.service.issue(f.command)
+ assert.equal(card.qrValues.length,1,'small real issued card must exercise single-QR transport')
+ assert.match(card.qrValues[0],/^shc:\/\d+$/u)
+ assert.equal(decodeSoschainSmartHealthCardQr(card.qrValues),card.compactJws)
+ const canonical=await verify(f,card),transport=await verify(f,card,{credential:card.qrValues[0],companion:card.companion.pqcValues})
+ assert.deepEqual(transport,canonical)
+})
+
+test('companion transport parity: reversed numeric SHC chunks verify the same exact compact card',async()=>{
+ const f=fixture()
+ // Deliberately incompressible synthetic clinical text exercises actual owned
+ // multi-QR encoding; no hand-built QR framing or duplicate parser lives here.
+ f.state.source.bundle.entry[2].resource.code={text:'synthetic-chunked-clinical-text-'+randomBytes(2400).toString('base64url')}
+ const card=await f.service.issue(f.command)
+ assert.ok(card.qrValues.length>1,'issued card must genuinely require multiple QR chunks')
+ const reversed=[...card.qrValues].reverse();assert.equal(decodeSoschainSmartHealthCardQr(reversed),card.compactJws)
+ const canonical=await verify(f,card),transport=await verify(f,card,{credential:reversed,companion:card.companion.pqcValues})
+ assert.deepEqual(transport,canonical)
+})
+
+test('companion transport parity: signed-file wrapper verifies the proof over the contained compact card',async()=>{
+ const f=fixture(),card=await f.service.issue(f.command),wrapper=JSON.stringify({verifiableCredential:[card.compactJws]})
+ const canonical=await verify(f,card),transport=await verify(f,card,{credential:wrapper})
+ assert.deepEqual(transport,canonical)
+})
+
+test('companion transport parity: another valid card and a tampered proof remain rejected through QR and file transports',async()=>{
+ const f=fixture(),first=await f.service.issue(f.command)
+ f.state.source.bundle.entry[2].resource.performedDateTime='2027-01-16T08:00:00.000Z'
+ const second=await f.service.issue({...f.command,operationId:'synthetic-second-transport-card'})
+ await assert.rejects(verify(f,second,{credential:[...second.qrValues],companion:first.companion.pqcValues}),code('clinical_document_pq_signature_invalid'))
+ const [header,,encoded]=first.companion.detachedJws.split('.'),signature=Buffer.from(encoded,'base64url');signature[0]^=1
+ const changed=encodePostQuantumDetachedProofQr(`${header}..${signature.toString('base64url')}`)
+ await assert.rejects(verify(f,first,{credential:JSON.stringify({verifiableCredential:[first.compactJws]}),companion:changed}),code('clinical_document_pq_signature_invalid'))
 })

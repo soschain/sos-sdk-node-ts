@@ -3,6 +3,7 @@ import {CryptographyService,encodePostQuantumDetachedProofQr,decodePostQuantumDe
 import {ClinicalDocumentHealthCardError,createClinicalDocumentHealthCardIssuer,verifyClinicalDocumentHealthCard,type AuthorizedClinicalDocument,type AuthorizedClinicalDocumentPort,type ClinicalDocumentHealthCardCommand,type ClinicalDocumentIssuer,type IssuedClinicalDocumentHealthCard,type OrganizationClinicalDocumentKeyVault,type VerifiedClinicalDocumentHealthCard} from './clinical-document-health-card.js'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 import type {ServerProfileSealer} from './profile-sealer.js'
+import {clinicalDocumentCompactInput} from './clinical-document-credential-input.js'
 
 const purpose='clinical-document-pq-proof',algorithm='ML-DSA-65',maxBytes=128*1024
 type Json=Record<string,unknown>
@@ -104,8 +105,9 @@ function proofInput(value:string|readonly string[]):string{
  return value
 }
 /** Verifies BOTH signatures. Public AKP keys may be projected beside EC keys at the configured issuer's existing JWKS endpoint. */
-export async function verifyClinicalDocumentCompanion(options:Readonly<{credential:string;companion:string|readonly string[];trustedIssuers:readonly ClinicalDocumentIssuer[];fetchImpl?:typeof fetch;nowSeconds?:number}>):Promise<VerifiedClinicalDocumentHealthCard&Readonly<{companion:Readonly<{alg:'ML-DSA-65';kid:string}>}>>{
- const verified=await verifyClinicalDocumentHealthCard(options),detached=proofInput(options.companion),parts=detached.split('..')
+export async function verifyClinicalDocumentCompanion(options:Readonly<{credential:string|readonly string[];companion:string|readonly string[];trustedIssuers:readonly ClinicalDocumentIssuer[];fetchImpl?:typeof fetch;nowSeconds?:number}>):Promise<VerifiedClinicalDocumentHealthCard&Readonly<{companion:Readonly<{alg:'ML-DSA-65';kid:string}>}>>{
+ const credential=clinicalDocumentCompactInput(options.credential,()=>{throw new ClinicalDocumentHealthCardError('clinical_document_shc_credential_invalid')})
+ const verified=await verifyClinicalDocumentHealthCard({...options,credential}),detached=proofInput(options.companion),parts=detached.split('..')
  if(parts.length!==2)fail('credential_invalid')
  let header:unknown
  try{header=JSON.parse(base64(parts[0]).toString('utf8'))}catch{fail('credential_invalid')}
@@ -120,7 +122,7 @@ export async function verifyClinicalDocumentCompanion(options:Readonly<{credenti
  if(!record(body)||!Array.isArray(body.keys)||body.keys.length>100)fail('key_invalid')
  const expectedKid=header.kid,matching=body.keys.filter(v=>record(v)&&v.kid===expectedKid);if(matching.length!==1)fail('key_invalid')
  const key=publicKey(matching[0]);let valid=false
- try{valid=await crypto().verifyDetachedJws(Buffer.from(options.credential,'utf8'),detached,key)}catch{fail('signature_invalid')}
+ try{valid=await crypto().verifyDetachedJws(Buffer.from(credential,'utf8'),detached,key)}catch{fail('signature_invalid')}
  if(!valid)fail('signature_invalid')
  return Object.freeze({...verified,companion:Object.freeze({alg:algorithm,kid:key.kid})})
 }

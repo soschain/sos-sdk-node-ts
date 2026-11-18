@@ -105,11 +105,15 @@ proof custody/signing; no companion is released following revocation.
 `publicProofJwks(issuer)` is also read-only. The host may combine its public AKP
 keys with `publicJwks(issuer)` EC keys at the existing configured issuer JWKS
 endpoint. Seeds and private parameters must never enter that projection.
-`verifyClinicalDocumentCompanion({credential: compactJws, companion,
+`verifyClinicalDocumentCompanion({credential, companion,
 trustedIssuers, fetchImpl?, nowSeconds?})` verifies both ordinary SHC and the
 separate proof against that same issuer/organization. Companion accepts the
 detached JWS or existing AF `pqc:/` URI/QR values; the existing codec defines
 their encoding. There is no arbitrary credential-selected discovery endpoint.
+The credential accepts the standard verifier's compact JWS, numeric SHC QR
+string/chunk array or signed-file wrapper. Both verifiers share one bounded
+internal normalizer; the detached signature always covers the contained
+compact JWS bytes, including when its presentation uses another encoding.
 
 ML-DSA JOSE registration is defined by
 [RFC 9964](https://www.rfc-editor.org/rfc/rfc9964.html). This companion is a

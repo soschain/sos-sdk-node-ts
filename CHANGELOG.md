@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Recheck each original document's clinical section within its owning vault
+  transaction on save, read and idempotent replay. Keep owner export separate
+  from professional authorization. Verify companion proofs over the same
+  compact SHC bytes for numeric QR chunks and signed-file input as well.
+  Strict build and 52 affected crypto/original-document cases pass; portal
+  integration and the cumulative release suite remain separate checks.
+
 - Expose a bounded unverified SHC issuer locator for server-owned trust
   selection, reusing the verifier parser without returning clinical data or
   performing credential-selected network discovery.
