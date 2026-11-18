@@ -170,10 +170,8 @@ function compactInput(input:string|readonly string[]):string {
   }
   return input
 }
-export type VerifiedClinicalDocumentHealthCard=Readonly<{status:'verified';issuer:string;organizationReference:string;payload:Readonly<RecordValue>}>
-/** Trusted issuer configuration, not credential content, determines the sole HTTPS JWKS endpoint. No redirects or arbitrary issuer discovery. */
-export async function verifyClinicalDocumentHealthCard(options:Readonly<{credential:string|readonly string[];trustedIssuers:readonly ClinicalDocumentIssuer[];fetchImpl?:typeof fetch;nowSeconds?:number}>):Promise<VerifiedClinicalDocumentHealthCard>{
-  const issuers=issuerList(options.trustedIssuers),compact=compactInput(options.credential)
+function parseCredential(input:string|readonly string[]):Readonly<{parts:readonly string[];header:RecordValue;payload:RecordValue;signature:Buffer}>{
+  const compact=compactInput(input)
   if(Buffer.byteLength(compact)>maxInput)fail('credential_invalid')
   const parts=compact.split('.');if(parts.length!==3)fail('credential_invalid')
   let header:RecordValue,payload:RecordValue,signature:Buffer
@@ -182,6 +180,19 @@ export async function verifyClinicalDocumentHealthCard(options:Readonly<{credent
     signature=base64(parts[2]);if(signature.length!==64)fail('credential_invalid')
     const p:unknown=JSON.parse(inflateRawSync(base64(parts[1]),{maxOutputLength:maxInflated}).toString('utf8'));if(!record(p))fail('credential_invalid');payload=p
   }catch{fail('credential_invalid')}
+  return{parts,header,payload,signature}
+}
+export type UnverifiedClinicalDocumentIssuer=Readonly<{issuer:string;signatureVerified:false}>
+/** Bounded locator only: no clinical payload, signature verification, authority or network discovery. The host must independently select a configured known issuer before verification. */
+export function inspectClinicalDocumentHealthCardIssuer(input:string|readonly string[]):UnverifiedClinicalDocumentIssuer{
+  const{payload}=parseCredential(input)
+  if(!text(payload.iss)||!validIssuer(payload.iss))fail('credential_invalid')
+  return Object.freeze({issuer:payload.iss,signatureVerified:false})
+}
+export type VerifiedClinicalDocumentHealthCard=Readonly<{status:'verified';issuer:string;organizationReference:string;payload:Readonly<RecordValue>}>
+/** Trusted issuer configuration, not credential content, determines the sole HTTPS JWKS endpoint. No redirects or arbitrary issuer discovery. */
+export async function verifyClinicalDocumentHealthCard(options:Readonly<{credential:string|readonly string[];trustedIssuers:readonly ClinicalDocumentIssuer[];fetchImpl?:typeof fetch;nowSeconds?:number}>):Promise<VerifiedClinicalDocumentHealthCard>{
+  const issuers=issuerList(options.trustedIssuers),{parts,header,payload,signature}=parseCredential(options.credential)
   const clock=options.nowSeconds??Math.floor(Date.now()/1000)
   // JWT NumericDate permits fractional seconds; official SHC examples use them.
   if(!Number.isFinite(clock)||clock<0||typeof payload.nbf!=='number'||!Number.isFinite(payload.nbf)||payload.nbf<0||payload.nbf>clock||!text(payload.iss)||!record(payload.vc)||!Array.isArray(payload.vc.type)||!payload.vc.type.includes('https://smarthealth.cards#health-card')||!record(payload.vc.credentialSubject)||payload.vc.credentialSubject.fhirVersion!=='4.0.1'||!record(payload.vc.credentialSubject.fhirBundle))fail('credential_invalid')

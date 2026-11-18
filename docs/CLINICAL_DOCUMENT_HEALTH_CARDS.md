@@ -76,6 +76,14 @@ Public `crlVersion` and `x5c` metadata is compatible; accepting it does not prov
 revocation status or certificate-chain trust. This API does not scan images or
 claim online licence enforcement by itself.
 
+To select a configured issuer without copying a decoder into each host, call
+`inspectClinicalDocumentHealthCardIssuer(input)`. It reuses the same bounded
+compact/numeric/signed-file parser and returns only
+`{issuer, signatureVerified: false}`. Even a tampered signature can yield this
+hint: it is a locator, not evidence. Match it against the server's known issuer
+registry or explicit configured trust before full verification. The helper
+does no network access and returns no clinical payload or authority decision.
+
 ## Separate organization post-quantum companion
 
 `createOrganizationClinicalDocumentProofKeyVault({vault, sealer, collection})`

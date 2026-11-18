@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Expose a bounded unverified SHC issuer locator for server-owned trust
+  selection, reusing the verifier parser without returning clinical data or
+  performing credential-selected network discovery.
+
 - Validate the integrated implementation with a strict build and all 499 Node
   tests passing, including retained email invitation behavior and the official
   SMART Health Card examples. Portal browser journeys and publication remain
