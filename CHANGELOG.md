@@ -2,6 +2,9 @@
 
 ## 0.6.0
 
+- Pin the verified Antifraud Data 0.4.0, FHIR Data 0.8.0, SOS Data 0.8.4 and
+  SOS SDK Core 0.8.0 registry artifacts with their exact lockfile integrity.
+
 - Project the controller's technical responsibility separately from occupational
   qualifications in signed workforce inventory. Resolve an omitted contact only
   through one active, exactly linked licence with matching stable identity and
