@@ -8,6 +8,8 @@
   tenant's offering catalogue and verify its receipt.
 - Publish an individual offering through the same registered controller
   without replacing the imported catalogue.
+- Carry the same-organization Demo offering projection in the catalogue
+  response from the authenticated BFF peer.
 - Read public gateway offering catalogues from server-configured tenant
   sources. Check publisher and sector on every response, preserve the
   configured local catalogue, and omit withdrawn tenant feeds.
