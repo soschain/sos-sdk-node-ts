@@ -15,6 +15,7 @@ import {openRegisteredCommunicationWallet} from './registered-communication-wall
 import {createVerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
 import {RegisteredResearchStudyClient} from './registered-research-study-client.js'
 import type {RegisteredSmartTokenAlgorithm} from './registered-did-keys.js'
+import {buildPractitionerRoleReferenceFromAssignmentIdentifier} from 'sos-data-utils-ts/provenance'
 import {own,text,pick,fingerprint,revision,profileFields,sessionFields,StoredProfileStateInvalidError} from './stored-profile-state.js'
 
 type Row=Record<string,unknown>
@@ -74,7 +75,7 @@ type ResearchStudyOptions=RegisteredEmployeeDraftRequesterOptions&Readonly<{
 /** Reuses the admitted employee's exact PIN-bound custody and rechecks it before returning a study grant. */
 export async function openRegisteredEmployeeResearchStudy(options:ResearchStudyOptions,input:RegisteredEmployeeDraftRequesterInput&Readonly<{idToken:string}>){
  const {idToken,...profileInput}=input
- const {identity,custody,walletKeyDerivationId,seed,publicJwks,guard}=await resolveCustody(options,profileInput)
+ const {identity,custody,walletKeyDerivationId,seed,publicJwks,check,clinicalCreatorBinding}=await resolveCustody(options,profileInput)
  const {actorDid,providerDid,routeContext,clientId,recordedRole}=identity
  const gateway=options.resolveGateway(providerDid,routeContext)
  const {wallet,context}=await openRegisteredCommunicationWallet({walletKeyDerivationId,unlockedWalletSeed:seed,
@@ -85,12 +86,20 @@ export async function openRegisteredEmployeeResearchStudy(options:ResearchStudyO
  const client=new RegisteredResearchStudyClient({baseUrl:options.gatewayBaseUrl,ctx:routeContext,actorDid,providerDid,clientId,
   role:recordedRole,bearerToken:idToken,secureTransportAdapter,smartTokenVerification:gateway.smartTokenVerification,appInfo:gateway.appInfo,
   signClientAssertion:custody.signClientAssertion,signIdentityPresentationJws:custody.signIdentityPresentationJws,now:options.now,fetchImpl:options.fetchImpl})
- return Object.freeze({profile:Object.freeze({actorDid,routeContext}),requestStudyAccess:async(studyId:string)=>{
-  await guard()
-  const grant=await client.requestStudyAccess(studyId)
-  await guard()
-  return grant
- }})
+ const recipient=()=>{
+  try{
+   const binding=own(clinicalCreatorBinding)
+   if(binding.kind!=='professional'||binding.role!==recordedRole||!Array.isArray(binding.actorDids)||!binding.actorDids.includes(actorDid)
+    ||!Array.isArray(binding.dcrClientIds)||!binding.dcrClientIds.includes(clientId))throw denied()
+   return buildPractitionerRoleReferenceFromAssignmentIdentifier(text(binding.authorIdentifier))
+  }catch{throw denied()}
+ }
+ return Object.freeze({profile:Object.freeze({actorDid,routeContext}),
+  invitationRecipient:recipient,
+  readStudyInvitationCommunications:()=>check(()=>client.readStudyInvitationCommunications(recipient())),
+  readInvitedResearchStudies:()=>check(()=>client.readInvitedResearchStudies(recipient())),
+  requestStudyAccess:(studyId:string)=>check(()=>client.requestStudyAccess(studyId)),
+ })
 }
 
 async function resolveCustody(options:RegisteredEmployeeDraftRequesterOptions,input:RegisteredEmployeeDraftRequesterInput){
@@ -166,5 +175,11 @@ async function resolve(options:RegisteredEmployeeDraftRequesterOptions,input:Reg
  await guard()
  const identity=Object.freeze({ownerId,profileId,actorDid:before.actorDid,providerDid:before.providerDid,routeContext:Object.freeze({...before.context}),
   clientId:text(before.profile.clientId),clientInstanceId:text(before.profile.clientInstanceId),recordedRole:before.recordedRole})
- return {identity,custody,seed,publicJwks,walletKeyDerivationId,guard}
+ const check=async<T>(operation:()=>Promise<T>):Promise<T>=>{
+  await guard()
+  const result=await operation()
+  await guard()
+  return result
+ }
+ return {identity,custody,seed,publicJwks,walletKeyDerivationId,check,clinicalCreatorBinding:before.profile.clinicalCreatorBinding}
 }

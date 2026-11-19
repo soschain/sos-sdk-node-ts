@@ -42,6 +42,8 @@ test('retains verified-email enrollment compatibility without a synthetic phone/
 })
 test('opens study custody for a completed phone enrollment and denies a revoked session before contacting the gateway',async()=>{
  const s=await setup()
+ await s.vault.put(collections.profiles,{...s.profile,clinicalCreatorBinding:{kind:'professional',role,
+  authorIdentifier:`urn:uuid:${safe.resourceUuid}`,actorDids:[s.profile.actorDid],dcrClientIds:[s.profile.clientId]}})
  let fetches=0
  const options={...s.options,resolveGateway:()=>({
   resolveRecipientJwk:async()=>{throw new Error('revoked_session_must_not_resolve_keys')},
@@ -50,9 +52,11 @@ test('opens study custody for a completed phone enrollment and denies a revoked 
  }),fetchImpl:async()=>{fetches++;throw new Error('revoked_session_must_not_contact_gateway')}}
  const opened=await api.openRegisteredEmployeeResearchStudy(options,{...s.input,idToken:'synthetic-firebase-token'})
  assert.deepEqual(opened.profile,{actorDid:s.profile.actorDid,routeContext})
+ assert.equal(opened.invitationRecipient(),`PractitionerRole/${safe.resourceUuid}`)
  assert.equal(JSON.stringify(opened).includes(seed),false)
  await s.vault.delete(collections.walletSessions,s.session.id)
  await assert.rejects(opened.requestStudyAccess(safe.resourceUuid),api.RegisteredEmployeeDraftRequesterDeniedError)
+ await assert.rejects(opened.readStudyInvitationCommunications(),api.RegisteredEmployeeDraftRequesterDeniedError)
  assert.equal(fetches,0)
 })
 test('admits the completed organization under its configured enrollment host without a lookup-directory tenant entry',async()=>{

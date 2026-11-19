@@ -4,7 +4,7 @@ import {createPublicKey,generateKeyPairSync,randomBytes,sign,verify} from 'node:
 import test from 'node:test'
 import {REPOSITORY_SAFE_EXAMPLES as safe} from 'sos-data-utils-ts/repository-privacy'
 import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
-import {HealthcareConsentPurposes} from 'fhir-data-utils-ts'
+import {CommunicationCategoryCodes,CommunicationClaim,FhirCodeSystems,HealthcareConsentPurposes} from 'fhir-data-utils-ts'
 import {OrganizationRegistrationWallet} from '../dist/organization-registration-wallet.js'
 import {createVerifiedGatewaySecureAdapter} from '../dist/registered-gateway-transport.js'
 import {openServerProfileCustodyKeys} from '../dist/server-profile-custody-keys.js'
@@ -14,7 +14,7 @@ test('signs a registered employee presentation and rejects a token for another s
  const providerDid=safe.didWeb,actorDid=`${providerDid}:employee:researcher`,clientId='registered-research-client'
  const ctx={tenantId:safe.tenantId,jurisdiction:'ES-MD',sector:'health-research'}
  const studyId=safe.resourceUuid,reference=`ResearchStudy/${studyId}`,scope=`organization/ResearchSubject.crus?study=${reference}`
- const now=1794614400,packets=[]
+ const now=1794614400,packets=[],directoryRequests=[]
  const memberContext={profile:{profileId:'research-member'},runtime:{runtimeId:'research-member-runtime',runtimeType:'backend-service'}}
  const gatewayContext={profile:{profileId:'research-gateway'},runtime:{runtimeId:'research-gateway-runtime',runtimeType:'backend-service'}}
  let memberPublicKeys
@@ -48,6 +48,11 @@ test('signs a registered employee presentation and rejects a token for another s
   fetchImpl:async (url,init)=>{
    const message=(await gateway.unpackWithContext(new URLSearchParams(init.body).get('request'),{context:gatewayContext})).content
    const path=new URL(url).pathname
+   if(path.includes('/_search')){
+    if(message.body){directoryRequests.push({path,body:message.body});return new Response('{}',{status:202})}
+    const response=await gateway.packForRecipientWithContext({thid:message.thid,iss:providerDid,aud:actorDid,body:{data:[]}},actorDid,{context:gatewayContext})
+    return Response.json({response})
+   }
    assert.equal(path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/identity/openid/smart/${message.body?'token':'token-response'}`)
    if(message.body){packets.push(message);return new Response('{}',{status:202})}
    const access_token=signed({iss:providerDid,aud:providerDid,sub:actorDid,client_id:clientId,scope,study:foreign?'ResearchStudy/other':reference,
@@ -70,4 +75,17 @@ test('signs a registered employee presentation and rejects a token for another s
  await assert.rejects(client.requestStudyAccess(studyId),/registered_research_study_grant_invalid/u)
  await assert.rejects(client.requestStudyAccess('other?study=foreign'),/research_study_resource_id_invalid/u)
  assert.equal(packets.length,2)
+ const party=`PractitionerRole/${safe.resourceUuid}`
+ await client.readStudyInvitationCommunications(party)
+ await client.readInvitedResearchStudies(party)
+ await assert.rejects(client.readInvitedResearchStudies('PractitionerRole/*'),/registered_research_party_invalid/u)
+ assert.deepEqual(directoryRequests.map(request=>request.path.split('/').slice(-4).join('/')), [
+  'individual/org.hl7.fhir.r4/Communication/_search','organization/org.hl7.fhir.r5/ResearchStudy/_search',
+ ])
+ assert.deepEqual(directoryRequests[0].body.entry[0].resource.parameter,[
+  {name:CommunicationClaim.Category,valueString:CommunicationCategoryCodes.Notification.attributeValue},
+  {name:CommunicationClaim.Topic,valueString:`${FhirCodeSystems.ActReason}|${HealthcareConsentPurposes.Research}`},
+  {name:'recipient',valueString:party},
+ ])
+ assert.deepEqual(directoryRequests[1].body.data[0].resource.meta.claims,{'ResearchStudy.party':[party]})
 })

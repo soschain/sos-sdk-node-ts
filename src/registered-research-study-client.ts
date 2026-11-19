@@ -1,6 +1,9 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { verifyPinnedJwt } from 'antifraud-data-utils-ts/clearing-house'
 import { CryptographyService, type PublicJwk } from 'antifraud-data-utils-ts/cryptography'
+import { CommunicationCategoryCodes, CommunicationClaim, FhirCodeSystems, HealthcareConsentPurposes } from 'fhir-data-utils-ts'
+import { buildFhirParametersResourceFromSearchParams } from 'fhir-data-utils-ts/fhir-parameters'
+import { ResearchStudyClaim } from 'fhir-data-utils-ts/research-study-r5'
 import { buildProfessionalIdentityVpPayload } from 'sos-data-utils-ts/professional-smart'
 import type { AppInfo, PollOptions, RouteContext } from 'sos-data-utils-ts/gateway-transport-contract'
 import { buildResearchStudyProfessionalSmartRequest } from 'sos-sdk-core-ts/research-study'
@@ -42,7 +45,7 @@ export class RegisteredResearchStudyGatewayError extends Error {
 /** Requests one study grant through already opened registered employee custody. */
 export class RegisteredResearchStudyClient {
   private readonly baseUrl: string
-  private readonly path: string
+  private readonly tenantPath: string
   private readonly transport: RegisteredGatewayTransport
 
   constructor(private readonly options: Options) {
@@ -56,9 +59,38 @@ export class RegisteredResearchStudyClient {
       || !options.providerDid.startsWith('did:web:') || options.secureTransportAdapter.gatewayDid !== options.providerDid
       || !options.bearerToken.trim()) throw new TypeError('registered_research_study_context_invalid')
     this.baseUrl = url.origin
-    this.path = `/${tenantId}/cds-${jurisdiction}/v1/${sector}/identity/openid/smart/token`
+    this.tenantPath = `/${tenantId}/cds-${jurisdiction}/v1/${sector}`
     this.transport = new RegisteredGatewayTransport({ ...options, baseUrl: this.baseUrl, errorPrefix: 'registered_research_study',
       submitError: status => new RegisteredResearchStudyGatewayError(status) })
+  }
+
+  /** Searches the governed research inbox for the bound assignment. */
+  async readStudyInvitationCommunications(party: string, pollOptions?: PollOptions) {
+    requirePractitionerRole(party)
+    const parameters = buildFhirParametersResourceFromSearchParams({
+      [CommunicationClaim.Category]: CommunicationCategoryCodes.Notification.attributeValue,
+      [CommunicationClaim.Topic]: `${FhirCodeSystems.ActReason}|${HealthcareConsentPurposes.Research}`,
+      recipient: party,
+    })
+    return this.searchInvitations('/individual/org.hl7.fhir.r4/Communication/_search', {
+      resourceType: 'Bundle', type: 'search', entry: [{ request: { method: 'POST', url: 'Communication/_search' }, resource: parameters }],
+    }, pollOptions)
+  }
+
+  /** Resolves assignments that still exist in the tenant ResearchStudy collection. */
+  async readInvitedResearchStudies(party: string, pollOptions?: PollOptions) {
+    requirePractitionerRole(party)
+    return this.searchInvitations('/organization/org.hl7.fhir.r5/ResearchStudy/_search', {
+      resourceType: 'Bundle', type: 'batch', data: [{ resource: { resourceType: 'Parameters', meta: { claims: { [ResearchStudyClaim.Party]: [party] } } } }],
+    }, pollOptions)
+  }
+
+  private searchInvitations(path: string, body: Record<string, unknown>, pollOptions?: PollOptions) {
+    const { actorDid, providerDid, clientId } = this.options
+    const thid = randomUUID()
+    return this.transport.exchange(`${this.tenantPath}${path}`, {
+      thid, jti: thid, iss: actorDid, aud: providerDid, client_id: clientId, body,
+    }, providerDid, pollOptions)
   }
 
   async requestStudyAccess(studyId: string, pollOptions?: PollOptions) {
@@ -67,14 +99,15 @@ export class RegisteredResearchStudyClient {
     const { actorDid, clientId, providerDid, role } = this.options
     const issuedAt = this.now()
     const thid = randomUUID()
-    const audience = `${this.baseUrl}${this.path}`
+    const path = `${this.tenantPath}/identity/openid/smart/token`
+    const audience = `${this.baseUrl}${path}`
     const [assertion, vpToken] = await Promise.all([
       this.options.signClientAssertion({ clientId, audience, issuedAt, jti: randomUUID() }),
       this.options.signIdentityPresentationJws({ claims: buildProfessionalIdentityVpPayload({
         clientId, actorDid, role, additionalPayload: { iss: clientId, sub: actorDid, aud: providerDid, iat: issuedAt, exp: issuedAt + 300, jti: randomUUID() },
       }) }),
     ])
-    const result = await this.transport.exchange(this.path, {
+    const result = await this.transport.exchange(path, {
       thid, jti: thid, iss: actorDid, aud: audience, client_id: clientId,
       body: { client_id: clientId, sub: actorDid, id_token: this.options.bearerToken, client_assertion: assertion,
         client_assertion_type: 'private_key_jwt', vp_token: vpToken, acr_values: 'urn:antifraud:acr:openid4vp:employee',
@@ -102,5 +135,11 @@ export class RegisteredResearchStudyClient {
     const seconds = Math.floor((this.options.now?.() ?? new Date()).getTime() / 1000)
     if (!Number.isSafeInteger(seconds) || seconds < 0) throw new TypeError('registered_research_study_clock_invalid')
     return seconds
+  }
+}
+
+function requirePractitionerRole(value: string) {
+  if (typeof value !== 'string' || !/^PractitionerRole\/[A-Za-z0-9.-]{1,64}$/u.test(value)) {
+    throw new TypeError('registered_research_party_invalid')
   }
 }
