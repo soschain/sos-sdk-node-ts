@@ -188,6 +188,20 @@ export class WorkforceClient{
    :resourceType==='SubscriptionTopic'||resourceType==='Subscription'?'entity/org.hl7.fhir.r5':'organization/org.hl7.fhir.r5'
   return this.transport.exchange(`${this.prefix}/${directory}/${resourceType}/${action}`,this.administrationMessage(body,operationId),identity.providerDid,pollOptions)
  }
+ /** Replaces the catalogue for the registered controller's tenant. GW authorizes the publisher and validates the document. */
+ async publishOfferingCatalogue(input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
+  const identity=this.controller(),{document,operationId}=input
+  if(!record(document)||!Object.hasOwn(document,'data')||typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,200}$/u.test(operationId)){
+   throw new TypeError('catalog_offering_document_invalid')
+  }
+  const path=`${this.prefix}/organization/org.schema/Catalog/_publish`
+  const result=await this.transport.exchange(path,this.administrationMessage(document,operationId),identity.providerDid,pollOptions)
+  const receipt=record(result.poll.body),total=record(receipt?.body)?.total
+  if(receipt?.type!=='org.schema.catalog-publication'||typeof total!=='number'||!Number.isSafeInteger(total)||total<1){
+   throw new WorkforceSubmitError(502,{error:'catalog_offering_publication_receipt_invalid'})
+  }
+  return {total}
+ }
  /** Reads the signed roster without querying or requiring a licence. */
  async getEmployeeDirectory(pollOptions?:PollOptions){
   const identity=this.controller()
