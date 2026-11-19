@@ -119,6 +119,24 @@ test('reads the registered study team and only the consent records matching the 
  assert.equal(messages.length,4)
 })
 
+test('reads inactive researchers for study assignment without looking up a licence', async () => {
+ const employee = employeeRow()
+ employee.resource.status = 'inactive'
+ const { client, messages } = await fixture(async path => {
+  assert.ok(path.endsWith('/entity/org.schema/Employee/_search'))
+  return { iss: tenantIssuer, body: { data: [employee] } }
+ })
+ assert.deepEqual(await client.getResearchAssignmentRoster(), [{
+  resourceId: employee.resource.id,
+  status: 'inactive',
+  occupationResourceId: employee.resource.contained[0].id,
+ }])
+ assert.equal(messages.length, 2)
+
+ employee.resource.contained[0].employeeId = safe.demoOrganizationUuids.healthCare
+ await assert.rejects(client.getResearchAssignmentRoster(), /workforce_inventory_invalid/u)
+})
+
 test('stores internal and public services on their fixed tenant routes and checks the receipt identity',async()=>{
  const id=safe.resourceUuid,department='clinic-department'
  const healthcare={resourceType:'HealthcareService',id,meta:{claims:{

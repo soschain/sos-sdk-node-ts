@@ -3,7 +3,7 @@ import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
 import {readIsco08Code} from 'antifraud-data-utils-ts/isco-08'
 import {normalizePublicAliasList} from 'antifraud-data-utils-ts/public-aliases'
 import {SchemaOrgPersonClaim as Person,SchemaOrgIndividualProductClaim as Product,SchemaOrgOrganizationClaim as Organization} from 'antifraud-data-utils-ts/schema-org-claims'
-import type {OrganizationEmployeeLifecycleRecord,OrganizationEmployeeLicenseRecord,LicenseListSummary} from 'sos-data-utils-ts/employee-routing'
+import {EmployeeDirectoryStatuses,type OrganizationEmployeeLifecycleRecord,type OrganizationEmployeeLicenseRecord,type LicenseListSummary} from 'sos-data-utils-ts/employee-routing'
 import {OrganizationLifecycleClaim,type OrganizationLifecycleSnapshot,type OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-lifecycle-contract'
 
 type Row=Record<string,unknown>
@@ -66,6 +66,34 @@ function occupationId(resource:Row,id:string):string|undefined{
  if(matches.length>1)throw invalid()
  return matches[0]
 }
+
+function employeeStatus(resource: Row): OrganizationEmployeeLifecycleRecord['status'] {
+ const state = optionalText(resource.status) ?? optionalText(row(resource.meta) ? resource.meta.status : undefined)
+ const { Active, Inactive, Purged, Unknown } = EmployeeDirectoryStatuses
+ return state === Active || state === Inactive || state === Purged ? state : Unknown
+}
+
+/** Project assignment candidates from the authenticated roster without reading any seat records. */
+export function projectResearchAssignmentRoster(employeeResponse: unknown): Array<Pick<
+ OrganizationEmployeeLifecycleRecord, 'resourceId' | 'status' | 'occupationResourceId' | 'email'
+>> {
+ const employeeIds = new Set<string>()
+ const occupationIds = new Set<string>()
+ return resources(employeeResponse).flatMap(resource => {
+  const resourceId = text(resource.id)
+  const status = employeeStatus(resource)
+  const occupationResourceId = occupationId(resource, resourceId)
+  const employeeKey = normalizeUuid(resourceId) ?? resourceId
+  const occupationKey = occupationResourceId && (normalizeUuid(occupationResourceId) ?? occupationResourceId)
+  if (employeeIds.has(employeeKey) || (occupationKey && occupationIds.has(occupationKey))) throw invalid()
+  employeeIds.add(employeeKey)
+  if (occupationKey) occupationIds.add(occupationKey)
+  if (status !== EmployeeDirectoryStatuses.Active && status !== EmployeeDirectoryStatuses.Inactive) return []
+  const email = optionalText(claims(resource)[Person.Email])
+  return [{ resourceId, status, ...(email ? { email } : {}), ...(occupationResourceId ? { occupationResourceId } : {}) }]
+ })
+}
+
 function deviceList(meta:Row,owner:ActorContactInput):OrganizationEmployeeLicenseRecord['devices']{
  const input=meta.deviceBindings??[]
  if(!Array.isArray(input))throw invalid()
@@ -101,8 +129,7 @@ export function projectWorkforceAdministration(employeeResponse:unknown,licenseR
   const employeeDid=buildOrganizationEmployeeDidWeb({...owner,organizationDidWeb:providerDid,role:roleCode})
   const identifier=optionalText(value[Person.Identifier])
   if(identifier!==employeeDid&&!normalizePublicAliasList(value[Person.SameAs]).includes(employeeDid))throw invalid()
-  const state=optionalText(resource.status)??optionalText(row(resource.meta)?resource.meta.status:undefined)
-  const status:OrganizationEmployeeLifecycleRecord['status']=state==='active'||state==='inactive'||state==='purged'?state:'unknown'
+  const status=employeeStatus(resource)
   return {id,owner,roleCode,employeeDid,status,occupationResourceId:occupationId(resource,id)}
  })
  if(new Set(people.map(person=>person.id)).size!==people.length)throw invalid()

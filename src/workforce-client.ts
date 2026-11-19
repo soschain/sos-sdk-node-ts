@@ -20,7 +20,7 @@ import {buildResearchStudyDatasetPublication,ClaimsHealthDcatCatalogRecord,Claim
 import {normalizeProvenanceR5FlatClaimsResource} from 'sos-data-utils-ts/provenance'
 import {readTenantPublicOfferingCatalog} from './public-offering-catalog-client.js'
 import {ClaimConsent} from 'fhir-data-utils-ts'
-import {projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
+import {projectResearchAssignmentRoster,projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
 
 type Row=Record<string,unknown>
 type CatalogFormat='org.schema'|'org.hl7.fhir.r5'|'org.w3.dcat'
@@ -390,6 +390,11 @@ export class WorkforceClient{
   return this.transport.exchange(this.prefix+'/entity/org.schema/Employee/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
    request:{method:'POST',url:'Employee/_search'},resource:{resourceType:'Parameters',parameter:[]},
   }]},'workforce-employees-'+randomUUID()),identity.tenantIssuer,pollOptions)
+ }
+ /** Lists active and invited employees available for descriptive study assignment. */
+ async getResearchAssignmentRoster(pollOptions?: PollOptions) {
+  const result = await this.getEmployeeDirectory(pollOptions)
+  return projectResearchAssignmentRoster(result.poll.body)
  }
  /** Authenticated directory envelopes become typed contacts and exact seat/device projections. */
  async getAdministration(pollOptions?:PollOptions){

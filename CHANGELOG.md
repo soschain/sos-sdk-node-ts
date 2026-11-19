@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Use registered controller custody for study administration at the fixed
-  gateway routes. Read the signed employee directory separately from licences.
+  gateway routes. Expose a typed assignment roster from the signed employee
+  directory that includes inactive staff and requires no licence lookup.
 - Use the registered controller's signed gateway transport to publish a
   tenant's offering catalogue and verify its receipt.
 - Publish an individual offering through the same registered controller
