@@ -144,6 +144,31 @@ test('stores internal and public services on their fixed tenant routes and check
  await assert.rejects(client.createHealthcareService({resource:{...healthcare,id:'invalid/route'},operationId:'catalog-invalid'}),/workforce_service_resource_invalid/u)
  assert.equal(messages.length,6)
 })
+
+test('reads one registered organization catalogue across the governed directory, clinical and DCAT collections',async()=>{
+ const resources={HealthcareService:{resourceType:'HealthcareService',id:safe.resourceUuid,meta:{claims:{[HealthcareServiceClaim.Name]:['Consultation']}}},
+  Service:normalizeDirectoryFlatClaimsResource(buildServiceDirectoryResource({id:safe.resourceUuid,organizationIdentifier:'clinic-department',
+   name:'Consultation',placeIdentifiers:['clinic-place'],serviceTypes:['consultation']}))}
+ const requests=[]
+ const {client}=await fixture(async(path,message)=>{
+  const [section,format,type,action]=path.split('/').slice(-4)
+  requests.push(`${section}/${format}/${type}/${action}`)
+  assert.deepEqual(message.body.data,[{resource:{resourceType:type,id:'search',meta:{claims:{}}}}])
+  const resource=resources[type]
+  return {iss:providerDid,body:{data:resource?[{response:{status:'200'},resource}]:[]}}
+ })
+ assert.deepEqual(await client.getOrganizationCatalog({operationId:'catalog-read'}),{
+  organizations:[],places:[],healthcareServices:[resources.HealthcareService],services:[resources.Service],products:[],datasets:[],records:[],
+ })
+ assert.deepEqual(new Set(requests),new Set([
+  ...['Organization','Place','Service','Product'].map(type=>`organization/org.schema/${type}/_search`),
+  'organization/org.hl7.fhir.r5/HealthcareService/_search',
+  ...['Dataset','CatalogRecord'].map(type=>`organization/org.w3.dcat/${type}/_search`),
+ ]))
+ const foreign=await fixture(async path=>({iss:providerDid,body:{data:path.includes('/HealthcareService/')
+  ?[{response:{status:'200'},resource:{...resources.HealthcareService,resourceType:'Patient'}}]:[]}}))
+ await assert.rejects(foreign.client.getOrganizationCatalog({operationId:'catalog-foreign'}),/workforce_catalog_resource_invalid/u)
+})
 test('projects a real encrypted phone workforce inventory and exact seven-field licence summary without an email placeholder',async()=>{
  need('getAdministration')
  const f=await fixture(async path=>path.includes('/Employee/')?{iss:tenantIssuer,body:{data:[employeeRow()]}}:{iss:providerDid,body:{data:[licenseRow()]}})

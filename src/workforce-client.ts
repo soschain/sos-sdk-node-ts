@@ -14,7 +14,8 @@ import {IdentityAuthRequestFields} from 'sos-data-utils-ts/identity-auth-wire-co
 import type {OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-lifecycle-contract'
 import type {OrganizationWorkflowFlatEntry} from 'sos-data-utils-ts/organization-workflow-access'
 import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
-import {normalizeDirectoryFlatClaimsResource,type DirectoryResource} from 'sos-data-utils-ts/place-service-directory'
+import {normalizeDirectoryFlatClaimsResource,type DirectoryResource,type DirectoryResourceType} from 'sos-data-utils-ts/place-service-directory'
+import {normalizeHealthDcatResource} from 'sos-data-utils-ts/health-dcat'
 import {ClaimConsent} from 'fhir-data-utils-ts'
 import {projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
 
@@ -231,6 +232,39 @@ export class WorkforceClient{
  /** Writes one offering without replacing the tenant's imported catalogue. */
  publishIndividualOffering(input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
   return this.publishCatalogueDocument('_upsert',input,pollOptions)
+ }
+
+ /** Reads the selected controller's internal catalogue and its directory and DCAT projections. */
+ async getOrganizationCatalog(input:Readonly<{operationId:string}>,pollOptions?:PollOptions){
+  const identity=this.controller()
+  const {operationId}=input
+  if(typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,180}$/u.test(operationId))throw new TypeError('workforce_catalog_operation_invalid')
+  const search=async <T>(format:'org.schema'|'org.hl7.fhir.r5'|'org.w3.dcat',
+   resourceType:DirectoryResourceType|'HealthcareService'|'Dataset'|'CatalogRecord',parse:(resource:Row)=>T)=>{
+   const body={resourceType:'Bundle',type:'batch',data:[{resource:{resourceType,id:'search',meta:{claims:{}}}}]}
+   const result=await this.transport.exchange(`${this.prefix}/organization/${format}/${resourceType}/_search`,
+    this.administrationMessage(body,`${operationId}-${resourceType}`),identity.providerDid,pollOptions)
+   const envelope=record(result.poll.body)
+   const response=record(envelope?.body)??envelope
+   if(!Array.isArray(response?.data))throw new Error('workforce_catalog_response_invalid')
+   return response.data.map((entry:unknown)=>{
+    const row=record(entry),status=Number(record(row?.response)?.status),resource=record(row?.resource)
+    if(Number.isInteger(status)&&status>=400&&status<=599)throw new WorkforceSubmitError(status,result.poll.body)
+    if(status!==200||resource?.resourceType!==resourceType||typeof resource.id!=='string'||!resource.id
+     ||!record(record(resource.meta)?.claims))throw new Error('workforce_catalog_resource_invalid')
+    return parse(resource)
+   })
+  }
+  const [organizations,places,healthcareServices,services,products,datasets,records]=await Promise.all([
+   search('org.schema','Organization',normalizeDirectoryFlatClaimsResource),
+   search('org.schema','Place',normalizeDirectoryFlatClaimsResource),
+   search('org.hl7.fhir.r5','HealthcareService',resource=>resource),
+   search('org.schema','Service',normalizeDirectoryFlatClaimsResource),
+   search('org.schema','Product',normalizeDirectoryFlatClaimsResource),
+   search('org.w3.dcat','Dataset',normalizeHealthDcatResource),
+   search('org.w3.dcat','CatalogRecord',normalizeHealthDcatResource),
+  ])
+  return {organizations,places,healthcareServices,services,products,datasets,records}
  }
 
  /** Creates the internal HealthcareService used for scheduling and clinical routing. */
