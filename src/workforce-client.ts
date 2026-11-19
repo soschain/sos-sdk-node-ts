@@ -174,12 +174,31 @@ export class WorkforceClient{
   }
   return {resourceType,operationId,result}
  }
+ /** Submits a server-built research administration Bundle through registered controller custody. */
+ async submitResearchAdministration(input:Readonly<{
+  resourceType:'ResearchStudy'|'Group'|'Consent'|'Communication'|'SubscriptionTopic'|'Subscription'
+  action:'_search'|'_batch';operationId:string;body:Readonly<Row>
+ }>,pollOptions?:PollOptions){
+  const identity=this.controller(),{resourceType,action,operationId,body}=input
+  const researchResource=resourceType==='ResearchStudy'||resourceType==='Group'||resourceType==='Consent'
+  const batchOnly=resourceType==='Communication'||resourceType==='SubscriptionTopic'||resourceType==='Subscription'
+  if(!(researchResource&&(action==='_search'||action==='_batch'))&&!(batchOnly&&action==='_batch'))throw new TypeError('workforce_research_route_invalid')
+  if(typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,200}$/u.test(operationId)||!record(body))throw new TypeError('workforce_research_input_invalid')
+  const directory=resourceType==='Communication'?'individual/org.hl7.fhir.api'
+   :resourceType==='SubscriptionTopic'||resourceType==='Subscription'?'entity/org.hl7.fhir.r5':'organization/org.hl7.fhir.r5'
+  return this.transport.exchange(`${this.prefix}/${directory}/${resourceType}/${action}`,this.administrationMessage(body,operationId),identity.providerDid,pollOptions)
+ }
+ /** Reads the signed roster without querying or requiring a licence. */
+ async getEmployeeDirectory(pollOptions?:PollOptions){
+  const identity=this.controller()
+  return this.transport.exchange(this.prefix+'/entity/org.schema/Employee/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
+   request:{method:'POST',url:'Employee/_search'},resource:{resourceType:'Parameters',parameter:[]},
+  }]},'workforce-employees-'+randomUUID()),identity.tenantIssuer,pollOptions)
+ }
  /** Authenticated directory envelopes become typed contacts and exact seat/device projections. */
  async getAdministration(pollOptions?:PollOptions){
   const identity=this.controller()
-  const employees=await this.transport.exchange(this.prefix+'/entity/org.schema/Employee/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
-   request:{method:'POST',url:'Employee/_search'},resource:{resourceType:'Parameters',parameter:[]},
-  }]},'workforce-employees-'+randomUUID()),identity.tenantIssuer,pollOptions)
+  const employees=await this.getEmployeeDirectory(pollOptions)
   const licenses=await this.transport.exchange(this.prefix+'/entity/org.schema/License/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
    type:'License-search-request-v1.0',request:{method:'POST'},meta:{},resource:{meta:{claims:{'@context':'org.schema','@type':'IndividualProduct:Search'}}},
   }]},'workforce-licenses-'+randomUUID()),identity.providerDid,pollOptions)

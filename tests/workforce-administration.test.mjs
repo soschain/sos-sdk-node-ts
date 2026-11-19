@@ -66,6 +66,20 @@ async function fixture(handler){
   hostRegistry:{hostDid,jurisdiction:'ES-MD',hostNetwork:'test-network',responseIssuer:hostDid,secureTransportAdapter:adapter(hostDid,hostPublic.signing)}}
  return {options,messages,client:new WorkforceClient(options)}
 }
+
+test('registered controller uses fixed research routes and verifies the correlated signed response',async()=>{
+ const body={resourceType:'Bundle',type:'batch',data:[{resource:{resourceType:'Parameters',meta:{claims:{'ResearchStudy.status':['draft']}}}}]}
+ const resultBody={resourceType:'Bundle',type:'searchset',data:[]}
+ const {client,messages}=await fixture(async(path,message)=>{
+  assert.equal(path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.hl7.fhir.r5/ResearchStudy/_search`)
+  assert.deepEqual(message.body,body)
+  return {iss:providerDid,body:resultBody}
+ })
+ const result=await client.submitResearchAdministration({resourceType:'ResearchStudy',action:'_search',operationId:'research-study-test',body})
+ assert.deepEqual(result.poll.body.body,resultBody)
+ await assert.rejects(()=>client.submitResearchAdministration({resourceType:'Patient',action:'_search',operationId:'research-study-test',body}),/workforce_research_route_invalid/u)
+ assert.equal(messages.length,2)
+})
 test('projects a real encrypted phone workforce inventory and exact seven-field licence summary without an email placeholder',async()=>{
  need('getAdministration')
  const f=await fixture(async path=>path.includes('/Employee/')?{iss:tenantIssuer,body:{data:[employeeRow()]}}:{iss:providerDid,body:{data:[licenseRow()]}})

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use registered controller custody for study administration at the fixed
+  gateway routes. Read the signed employee directory separately from licences.
 - Read public gateway offering catalogues from server-configured tenant
   sources. Check publisher and sector on every response, preserve the
   configured local catalogue, and omit withdrawn tenant feeds.
