@@ -11,6 +11,8 @@ import {OrganizationLifecycleClaim} from 'sos-data-utils-ts/organization-lifecyc
 import {buildTestNetworkControllerWorkflowAssignment,OrganizationWorkflowGroupKinds,OrganizationWorkflowCapabilities} from 'sos-data-utils-ts/organization-workflow-access'
 import {ClaimConsent,ConsentStatuses} from 'fhir-data-utils-ts'
 import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
+import {buildServiceDirectoryResource,normalizeDirectoryFlatClaimsResource} from 'sos-data-utils-ts/place-service-directory'
+import {HealthcareServiceClaim} from 'fhir-data-utils-ts/claims'
 import {OrganizationRegistrationWallet} from '../dist/organization-registration-wallet.js'
 import {createVerifiedGatewaySecureAdapter} from '../dist/registered-gateway-transport.js'
 import {WorkforceClient} from '../dist/workforce-client.js'
@@ -113,6 +115,34 @@ test('reads the registered study team and only the consent records matching the 
  ])
  await assert.rejects(async()=>client.searchResearchStudyConsents({studyId,partyReference:'Patient/synthetic',operationId:'research-denied'}),/workforce_research_study_party_invalid/u)
  assert.equal(messages.length,4)
+})
+
+test('stores internal and public services on their fixed tenant routes and checks the receipt identity',async()=>{
+ const id=safe.resourceUuid,department='clinic-department'
+ const healthcare={resourceType:'HealthcareService',id,meta:{claims:{
+  [HealthcareServiceClaim.Identifier]:id,[HealthcareServiceClaim.Name]:'Consultation',
+  [HealthcareServiceClaim.Organization]:`Organization/${department}`,[HealthcareServiceClaim.Active]:'true',
+ }}}
+ const directory=buildServiceDirectoryResource({id,organizationIdentifier:department,name:'Consultation',
+  placeIdentifiers:['clinic-place'],serviceTypes:['consultation'],areaServed:[ctx.jurisdiction]})
+ const {client,messages}=await fixture(async(_path,message)=>{
+  const resource=message.body.data[0].resource
+  return {iss:providerDid,body:{data:[{response:{status:'200'},resource:{...resource,
+   id:message.thid==='catalog-mismatched-receipt'?'other-service':resource.id}}]}}
+ })
+ await client.createHealthcareService({resource:healthcare,operationId:'catalog-healthcare-create'})
+ await client.publishDirectoryService({resource:directory,operationId:'catalog-service-publish'})
+ const submitted=messages.filter(({path})=>!path.endsWith('-response'))
+ assert.deepEqual(submitted.map(({path})=>path.split('/').slice(-4).join('/')),[
+  'organization/org.hl7.fhir.r5/HealthcareService/_batch','organization/org.schema/Service/_batch',
+ ])
+ assert.deepEqual(submitted.map(({message})=>message.body.data[0]),[
+  {request:{method:'POST',url:`HealthcareService/${id}`},resource:healthcare},
+  {type:'Service-schema.org',request:{method:'PUT',url:`Service/${id}`},resource:normalizeDirectoryFlatClaimsResource(directory)},
+ ])
+ await assert.rejects(client.publishDirectoryService({resource:directory,operationId:'catalog-mismatched-receipt'}),/workforce_service_receipt_invalid/u)
+ await assert.rejects(client.createHealthcareService({resource:{...healthcare,id:'invalid/route'},operationId:'catalog-invalid'}),/workforce_service_resource_invalid/u)
+ assert.equal(messages.length,6)
 })
 test('projects a real encrypted phone workforce inventory and exact seven-field licence summary without an email placeholder',async()=>{
  need('getAdministration')

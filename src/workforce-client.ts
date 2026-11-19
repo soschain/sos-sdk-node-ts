@@ -14,6 +14,7 @@ import {IdentityAuthRequestFields} from 'sos-data-utils-ts/identity-auth-wire-co
 import type {OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-lifecycle-contract'
 import type {OrganizationWorkflowFlatEntry} from 'sos-data-utils-ts/organization-workflow-access'
 import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
+import {normalizeDirectoryFlatClaimsResource,type DirectoryResource} from 'sos-data-utils-ts/place-service-directory'
 import {ClaimConsent} from 'fhir-data-utils-ts'
 import {projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
 
@@ -230,6 +231,39 @@ export class WorkforceClient{
  /** Writes one offering without replacing the tenant's imported catalogue. */
  publishIndividualOffering(input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
   return this.publishCatalogueDocument('_upsert',input,pollOptions)
+ }
+
+ /** Creates the internal HealthcareService used for scheduling and clinical routing. */
+ async createHealthcareService(input:Readonly<{
+  resource:Readonly<{resourceType:'HealthcareService';id:string;meta:Readonly<{claims:Readonly<Row>}>}>
+  operationId:string
+ }>,pollOptions?:PollOptions){
+  if(input.resource?.resourceType!=='HealthcareService'||!record(input.resource.meta?.claims))throw new TypeError('workforce_service_resource_invalid')
+  return this.writeServiceResource('org.hl7.fhir.r5','HealthcareService','POST',input.resource,input.operationId,pollOptions)
+ }
+
+ /** Upserts the public Schema.org directory projection. Commercial media and prices use the offering catalogue. */
+ async publishDirectoryService(input:Readonly<{resource:DirectoryResource;operationId:string}>,pollOptions?:PollOptions){
+  const resource=normalizeDirectoryFlatClaimsResource(input.resource)
+  if(resource.resourceType!=='Service')throw new TypeError('workforce_service_resource_invalid')
+  return this.writeServiceResource('org.schema','Service','PUT',resource,input.operationId,pollOptions)
+ }
+
+ private async writeServiceResource(format:'org.hl7.fhir.r5'|'org.schema',resourceType:'HealthcareService'|'Service',
+  method:'POST'|'PUT',resource:Readonly<{id:string}>,operationId:string,pollOptions?:PollOptions){
+  const identity=this.controller()
+  if(typeof resource.id!=='string'||!/^[A-Za-z0-9.-]{1,64}$/u.test(resource.id))throw new TypeError('workforce_service_resource_invalid')
+  if(typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,200}$/u.test(operationId))throw new TypeError('workforce_service_operation_invalid')
+  const entry={...(resourceType==='Service'?{type:'Service-schema.org'}:{}),request:{method,url:`${resourceType}/${resource.id}`},resource}
+  const body={resourceType:'Bundle',type:'batch',data:[entry]}
+  const result=await this.transport.exchange(`${this.prefix}/organization/${format}/${resourceType}/_batch`,
+   this.administrationMessage(body,operationId),identity.providerDid,pollOptions)
+  const [receipt]=gatewayResponseEntries(result.poll.body)
+  const status=Number(record(receipt?.response)?.status)
+  if(Number.isInteger(status)&&status>=400&&status<=599)throw new WorkforceSubmitError(status,result.poll.body)
+  const confirmed=confirmedTarget(result.poll.body,resource.id,'workforce_service_receipt_invalid')
+  if(confirmed.resourceType!==resourceType)throw new Error('workforce_service_receipt_invalid')
+  return {resourceId:resource.id}
  }
  private async publishCatalogueDocument(action:'_publish'|'_upsert',input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
   const identity=this.controller(),{document,operationId}=input
