@@ -6,9 +6,16 @@ import {EmployeeActivationGrantVersions} from 'sos-data-utils-ts/employee-routin
 import {PROFILE_SECRET_ENVELOPE_VERSION} from 'sos-data-utils-ts/server-profile-secret-contract'
 import type {IVaultRepository} from 'sos-sdk-core-ts/vault-repository'
 import type {ServerProfileSealer} from 'sos-sdk-core-ts/profile-sealer'
+import type {AppInfo,RouteContext} from 'sos-data-utils-ts/gateway-transport-contract'
+import type {PublicJwk} from 'antifraud-data-utils-ts/cryptography'
 import type {TransactionalVaultRepository} from './transactional-vault.js'
 import {employeeActivationGrantMatchesContact} from './employee-activation-grant.js'
 import {openServerProfileCustodyKeys} from './server-profile-custody-keys.js'
+import {openRegisteredCommunicationWallet} from './registered-communication-wallet.js'
+import {createVerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
+import {RegisteredResearchStudyClient} from './registered-research-study-client.js'
+import type {RegisteredSmartTokenAlgorithm} from './registered-did-keys.js'
+import {buildPractitionerRoleReferenceFromAssignmentIdentifier} from 'sos-data-utils-ts/provenance'
 import {own,text,pick,fingerprint,revision,profileFields,sessionFields,StoredProfileStateInvalidError} from './stored-profile-state.js'
 
 type Row=Record<string,unknown>
@@ -52,9 +59,53 @@ function namespace(providerDid:string,authority:string):void{
  * It does not return current employment, licence, SMART or Consent authority.
  */
 export async function resolveRegisteredEmployeeDraftRequester(options:RegisteredEmployeeDraftRequesterOptions,input:RegisteredEmployeeDraftRequesterInput):Promise<RegisteredEmployeeDraftRequester>{
+ return (await resolveCustody(options,input)).identity
+}
+
+type ResearchStudyOptions=RegisteredEmployeeDraftRequesterOptions&Readonly<{
+ resolveGateway(providerDid:string,route:RouteContext):Readonly<{
+  resolveRecipientJwk(did:string):Promise<Readonly<Record<string,unknown>>>
+  resolveGatewaySigningJwk(did:string):Promise<PublicJwk>
+  smartTokenVerification:Readonly<{algorithm:RegisteredSmartTokenAlgorithm;resolveSigningJwk(did:string):Promise<PublicJwk>}>
+  appInfo?:AppInfo
+ }>
+ fetchImpl?:typeof fetch
+}>
+
+/** Reuses the admitted employee's exact PIN-bound custody and rechecks it before returning a study grant. */
+export async function openRegisteredEmployeeResearchStudy(options:ResearchStudyOptions,input:RegisteredEmployeeDraftRequesterInput&Readonly<{idToken:string}>){
+ const {idToken,...profileInput}=input
+ const {identity,custody,walletKeyDerivationId,seed,publicJwks,check,clinicalCreatorBinding}=await resolveCustody(options,profileInput)
+ const {actorDid,providerDid,routeContext,clientId,recordedRole}=identity
+ const gateway=options.resolveGateway(providerDid,routeContext)
+ const {wallet,context}=await openRegisteredCommunicationWallet({walletKeyDerivationId,unlockedWalletSeed:seed,
+  registeredPublicJwks:publicJwks,resolveRecipientJwk:gateway.resolveRecipientJwk})
+ const secureTransportAdapter=createVerifiedGatewaySecureAdapter({gatewayDid:providerDid,
+  pack:message=>wallet.packForRecipientWithContext(message,providerDid,{context}),decrypt:packed=>wallet.unpackWithContext(packed,{context}),
+  resolveGatewaySigningJwk:gateway.resolveGatewaySigningJwk,errorPrefix:'registered_research_study'})
+ const client=new RegisteredResearchStudyClient({baseUrl:options.gatewayBaseUrl,ctx:routeContext,actorDid,providerDid,clientId,
+  role:recordedRole,bearerToken:idToken,secureTransportAdapter,smartTokenVerification:gateway.smartTokenVerification,appInfo:gateway.appInfo,
+  signClientAssertion:custody.signClientAssertion,signIdentityPresentationJws:custody.signIdentityPresentationJws,now:options.now,fetchImpl:options.fetchImpl})
+ const recipient=()=>{
+  try{
+   const binding=own(clinicalCreatorBinding)
+   if(binding.kind!=='professional'||binding.role!==recordedRole||!Array.isArray(binding.actorDids)||!binding.actorDids.includes(actorDid)
+    ||!Array.isArray(binding.dcrClientIds)||!binding.dcrClientIds.includes(clientId))throw denied()
+   return buildPractitionerRoleReferenceFromAssignmentIdentifier(text(binding.authorIdentifier))
+  }catch{throw denied()}
+ }
+ return Object.freeze({profile:Object.freeze({actorDid,routeContext}),
+  invitationRecipient:recipient,
+  readStudyInvitationCommunications:()=>check(()=>client.readStudyInvitationCommunications(recipient())),
+  readInvitedResearchStudies:()=>check(()=>client.readInvitedResearchStudies(recipient())),
+  requestStudyAccess:(studyId:string)=>check(()=>client.requestStudyAccess(studyId)),
+ })
+}
+
+async function resolveCustody(options:RegisteredEmployeeDraftRequesterOptions,input:RegisteredEmployeeDraftRequesterInput){
  try{return await resolve(options,input)}catch(error){if(error instanceof StoredProfileStateInvalidError)throw denied();throw error}
 }
-async function resolve(options:RegisteredEmployeeDraftRequesterOptions,input:RegisteredEmployeeDraftRequesterInput):Promise<RegisteredEmployeeDraftRequester>{
+async function resolve(options:RegisteredEmployeeDraftRequesterOptions,input:RegisteredEmployeeDraftRequesterInput){
  const vault=options.vault,sealer=options.sealer,now=options.now,authority=text(options.hostAuthorityDid)
  const values=own(input)
  if(Object.keys(values).some(name=>!['ownerId','profileId','profileSessionToken','verifiedContact'].includes(name)))throw denied()
@@ -111,11 +162,24 @@ async function resolve(options:RegisteredEmployeeDraftRequesterOptions,input:Reg
  const before=await vault.runTransaction(capture)
  const seed=await sealer.unseal(text(before.session.sealedWalletSeed),`${ownerId}:${profileId}:${sessionId}:wallet-session-seed`)
  if(typeof seed!=='string'||!/^[A-Za-z0-9_-]{43}$/u.test(seed)||Buffer.from(seed,'base64url').toString('base64url')!==seed)throw denied()
- const publicJwks=before.profile.publicJwks
- if(!Array.isArray(publicJwks))throw denied()
- try{
-  await openServerProfileCustodyKeys({walletKeyDerivationId:text(before.profile.walletKeyDerivationId??profileId,512),unlockedWalletSeed:seed,binding:{kind:'registered',publicJwks:publicJwks.map(own),storagePublicJwk:own(before.profile.storagePublicJwk)}})
- }catch(error){if(error instanceof TypeError&&error.message==='server_profile_custody_binding_invalid')throw denied();throw error}
- await vault.runTransaction(async port=>{const current=await capture(port);if(fingerprint(before)!==fingerprint(current))throw denied()})
- return Object.freeze({ownerId,profileId,actorDid:before.actorDid,providerDid:before.providerDid,routeContext:Object.freeze({...before.context}),clientId:text(before.profile.clientId),clientInstanceId:text(before.profile.clientInstanceId),recordedRole:before.recordedRole})
+ if(!Array.isArray(before.profile.publicJwks))throw denied()
+ const publicJwks=before.profile.publicJwks.map(own),walletKeyDerivationId=text(before.profile.walletKeyDerivationId??profileId,512)
+ const custody=await openServerProfileCustodyKeys({walletKeyDerivationId,unlockedWalletSeed:seed,
+  binding:{kind:'registered',publicJwks,storagePublicJwk:own(before.profile.storagePublicJwk)}}).catch(error=>{
+  if(error instanceof TypeError&&error.message==='server_profile_custody_binding_invalid')throw denied();throw error
+ })
+ const guard=async()=>{
+  try{await vault.runTransaction(async port=>{const current=await capture(port);if(fingerprint(before)!==fingerprint(current))throw denied()})}
+  catch(error){if(error instanceof StoredProfileStateInvalidError)throw denied();throw error}
+ }
+ await guard()
+ const identity=Object.freeze({ownerId,profileId,actorDid:before.actorDid,providerDid:before.providerDid,routeContext:Object.freeze({...before.context}),
+  clientId:text(before.profile.clientId),clientInstanceId:text(before.profile.clientInstanceId),recordedRole:before.recordedRole})
+ const check=async<T>(operation:()=>Promise<T>):Promise<T>=>{
+  await guard()
+  const result=await operation()
+  await guard()
+  return result
+ }
+ return {identity,custody,seed,publicJwks,walletKeyDerivationId,check,clinicalCreatorBinding:before.profile.clinicalCreatorBinding}
 }

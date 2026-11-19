@@ -10,6 +10,11 @@ import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
 import {OrganizationLifecycleClaim} from 'sos-data-utils-ts/organization-lifecycle-contract'
 import {buildTestNetworkControllerWorkflowAssignment,OrganizationWorkflowGroupKinds,OrganizationWorkflowCapabilities} from 'sos-data-utils-ts/organization-workflow-access'
 import {ClaimConsent,ConsentStatuses} from 'fhir-data-utils-ts'
+import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
+import {buildServiceDirectoryResource,normalizeDirectoryFlatClaimsResource} from 'sos-data-utils-ts/place-service-directory'
+import {HealthcareServiceClaim} from 'fhir-data-utils-ts/claims'
+import {buildHealthDcatDataset,buildHealthDcatDataService,buildHealthDcatDistribution,ClaimsHealthDcatCatalogRecord} from 'sos-data-utils-ts/health-dcat'
+import {buildResearchStudyProvenanceResource} from 'sos-data-utils-ts/provenance'
 import {OrganizationRegistrationWallet} from '../dist/organization-registration-wallet.js'
 import {createVerifiedGatewaySecureAdapter} from '../dist/registered-gateway-transport.js'
 import {WorkforceClient} from '../dist/workforce-client.js'
@@ -66,6 +71,173 @@ async function fixture(handler){
   hostRegistry:{hostDid,jurisdiction:'ES-MD',hostNetwork:'test-network',responseIssuer:hostDid,secureTransportAdapter:adapter(hostDid,hostPublic.signing)}}
  return {options,messages,client:new WorkforceClient(options)}
 }
+
+test('registered controller uses fixed research routes and verifies the correlated signed response',async()=>{
+ const body={resourceType:'Bundle',type:'batch',data:[{resource:{resourceType:'Parameters',meta:{claims:{'ResearchStudy.status':['draft']}}}}]}
+ const resultBody={resourceType:'Bundle',type:'searchset',data:[]}
+ const {client,messages}=await fixture(async(path,message)=>{
+  assert.equal(path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.hl7.fhir.r5/ResearchStudy/_search`)
+  assert.deepEqual(message.body,body)
+  return {iss:providerDid,body:resultBody}
+ })
+ const result=await client.submitResearchAdministration({resourceType:'ResearchStudy',action:'_search',operationId:'research-study-test',body})
+ assert.deepEqual(result.poll.body.body,resultBody)
+ await assert.rejects(()=>client.submitResearchAdministration({resourceType:'Patient',action:'_search',operationId:'research-study-test',body}),/workforce_research_route_invalid/u)
+ assert.equal(messages.length,2)
+})
+
+test('reads research studies through the registered tenant without a caller-built route or Bundle',async()=>{
+ const claims={'ResearchStudy.status':['draft']}
+ const body={resourceType:'Bundle',type:'searchset',data:[]}
+ const {client,messages}=await fixture(async(path,message)=>{
+  assert.equal(path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.hl7.fhir.r5/ResearchStudy/_search`)
+  assert.deepEqual(message.body,{resourceType:'Bundle',type:'batch',data:[{
+   resource:{resourceType:'Parameters',meta:{claims}},
+  }]})
+  return {iss:providerDid,body}
+ })
+ const result=await client.searchResearchStudies({operationId:'research-study-list',claims})
+ assert.deepEqual(result.poll.body.body,body)
+ assert.equal(messages.length,2)
+})
+
+test('reads the registered study team and only the consent records matching the study and selected actor',async()=>{
+ const studyId=safe.resourceUuid
+ const partyReference=`PractitionerRole/${safe.demoOrganizationUuids.healthCare}`
+ const requests=[]
+ const {client,messages}=await fixture(async(path,message)=>{
+  requests.push([path.split('/').slice(-2).join('/'),message.body.data[0].resource.meta.claims])
+  return {iss:providerDid,body:{resourceType:'Bundle',type:'searchset',data:[]}}
+ })
+ await client.searchResearchReviewTeam({studyId,operationId:'research-team-search'})
+ await client.searchResearchStudyConsents({studyId,partyReference,operationId:'research-consent-search'})
+ assert.deepEqual(requests,[
+  ['Group/_search',{'Group.identifier':[buildResearchStudyReviewTeamGroupSearch(studyId).identifier]}],
+  ['Consent/_search',{[ClaimConsent.sourceReference]:[`ResearchStudy/${studyId}`],[ClaimConsent.actorIdentifier]:[partyReference]}],
+ ])
+ await assert.rejects(async()=>client.searchResearchStudyConsents({studyId,partyReference:'Patient/synthetic',operationId:'research-denied'}),/workforce_research_study_party_invalid/u)
+ assert.equal(messages.length,4)
+})
+
+test('reads inactive researchers for study assignment without looking up a licence', async () => {
+ const employee = employeeRow()
+ employee.resource.status = 'inactive'
+ const { client, messages } = await fixture(async path => {
+  assert.ok(path.endsWith('/entity/org.schema/Employee/_search'))
+  return { iss: tenantIssuer, body: { data: [employee] } }
+ })
+ assert.deepEqual(await client.getResearchAssignmentRoster(), [{
+  resourceId: employee.resource.id,
+  status: 'inactive',
+  occupationResourceId: employee.resource.contained[0].id,
+ }])
+ assert.equal(messages.length, 2)
+
+ employee.resource.contained[0].employeeId = safe.demoOrganizationUuids.healthCare
+ await assert.rejects(client.getResearchAssignmentRoster(), /workforce_inventory_invalid/u)
+})
+
+test('stores internal and public services on their fixed tenant routes and checks the receipt identity',async()=>{
+ const id=safe.resourceUuid,department='clinic-department'
+ const healthcare={resourceType:'HealthcareService',id,meta:{claims:{
+  [HealthcareServiceClaim.Identifier]:id,[HealthcareServiceClaim.Name]:'Consultation',
+  [HealthcareServiceClaim.Organization]:`Organization/${department}`,[HealthcareServiceClaim.Active]:'true',
+ }}}
+ const directory=buildServiceDirectoryResource({id,organizationIdentifier:department,name:'Consultation',
+  placeIdentifiers:['clinic-place'],serviceTypes:['consultation'],areaServed:[ctx.jurisdiction]})
+ const {client,messages}=await fixture(async(_path,message)=>{
+  const resource=message.body.data[0].resource
+  return {iss:providerDid,body:{data:[{response:{status:'200'},resource:{...resource,
+   id:message.thid==='catalog-mismatched-receipt'?'other-service':resource.id}}]}}
+ })
+ await client.createHealthcareService({resource:healthcare,operationId:'catalog-healthcare-create'})
+ await client.publishDirectoryService({resource:directory,operationId:'catalog-service-publish'})
+ const submitted=messages.filter(({path})=>!path.endsWith('-response'))
+ assert.deepEqual(submitted.map(({path})=>path.split('/').slice(-4).join('/')),[
+  'organization/org.hl7.fhir.r5/HealthcareService/_batch','organization/org.schema/Service/_batch',
+ ])
+ assert.deepEqual(submitted.map(({message})=>message.body.data[0]),[
+  {request:{method:'POST',url:`HealthcareService/${id}`},resource:healthcare},
+  {type:'Service-schema.org',request:{method:'PUT',url:`Service/${id}`},resource:normalizeDirectoryFlatClaimsResource(directory)},
+ ])
+ await assert.rejects(client.publishDirectoryService({resource:directory,operationId:'catalog-mismatched-receipt'}),/workforce_service_receipt_invalid/u)
+ await assert.rejects(client.createHealthcareService({resource:{...healthcare,id:'invalid/route'},operationId:'catalog-invalid'}),/workforce_service_resource_invalid/u)
+ assert.equal(messages.length,6)
+})
+
+test('reads one registered organization catalogue across the governed directory, clinical and DCAT collections',async()=>{
+ const resources={HealthcareService:{resourceType:'HealthcareService',id:safe.resourceUuid,meta:{claims:{[HealthcareServiceClaim.Name]:['Consultation']}}},
+  Service:normalizeDirectoryFlatClaimsResource(buildServiceDirectoryResource({id:safe.resourceUuid,organizationIdentifier:'clinic-department',
+   name:'Consultation',placeIdentifiers:['clinic-place'],serviceTypes:['consultation']}))}
+ const requests=[]
+ const {client,options}=await fixture(async(path,message)=>{
+  const [section,format,type,action]=path.split('/').slice(-4)
+  requests.push(`${section}/${format}/${type}/${action}`)
+  assert.deepEqual(message.body.data,[{resource:{resourceType:type,id:'search',meta:{claims:{}}}}])
+  const resource=resources[type]
+  return {iss:providerDid,body:{data:resource?[{response:{status:'200'},resource}]:[]}}
+ })
+ assert.deepEqual(await client.getOrganizationCatalog({operationId:'catalog-read'}),{
+  organizations:[],places:[],healthcareServices:[resources.HealthcareService],services:[resources.Service],products:[],datasets:[],records:[],
+ })
+ assert.deepEqual(new Set(requests),new Set([
+  ...['Organization','Place','Service','Product'].map(type=>`organization/org.schema/${type}/_search`),
+  'organization/org.hl7.fhir.r5/HealthcareService/_search',
+  ...['Dataset','CatalogRecord'].map(type=>`organization/org.w3.dcat/${type}/_search`),
+ ]))
+ const foreign=await fixture(async path=>({iss:providerDid,body:{data:path.includes('/HealthcareService/')
+  ?[{response:{status:'200'},resource:{...resources.HealthcareService,resourceType:'Patient'}}]:[]}}))
+ await assert.rejects(foreign.client.getOrganizationCatalog({operationId:'catalog-foreign'}),/workforce_catalog_resource_invalid/u)
+ const offering={id:'published-tracker',type:'Product',name:'Tracker',description:'Tracker',sector:ctx.sector,category:'devices',demo:false,
+  publisher:{id:providerDid,name:'Clinic'},offers:[{id:'tracker',seller:{id:providerDid,name:'Clinic'},eligibleRegions:[{country:'ES',regions:[]}],
+   deliveryCountries:[],supportCountries:[],operationCountries:[]}]}
+ let fetched=0
+ const published=new WorkforceClient({...options,fetchImpl:async(url,init)=>{
+  fetched++
+  assert.match(new URL(url).pathname,new RegExp(`^/${ctx.tenantId}/cds-[^/]+/v1/${ctx.sector}/`))
+  assert.equal(init.credentials,'omit')
+  assert.equal(init.redirect,'error')
+  assert.equal(new Headers(init.headers).has('authorization'),false)
+  return Response.json([fetched===1?offering:{...offering,publisher:{id:safe.didWeb,name:'Other publisher'}}])
+ }})
+ assert.deepEqual((await published.getPublishedOfferings()).map(product=>product.id),[offering.id])
+ await assert.rejects(published.getPublishedOfferings(),/public_offering_api_scope_mismatch/u)
+})
+test('publishes a study dataset with Provenance and archives only its persisted record',async()=>{
+ const authority={organizationIdentifier:providerDid,controllerIdentifier:controllerDid,actingControllerIdentifier:controllerDid}
+ const study='ResearchStudy/study-one',modifiedAt='2026-09-10T00:00:00.000Z',accessUrl=safe.httpsBaseUrl
+ const accessRights='NON_PUBLIC',healthDataAccessBodyIdentifier='Organization/hdab-one'
+ const distribution=buildHealthDcatDistribution({...authority,id:'distribution-one',title:'Study data',accessUrl,format:'JSON',accessRights,healthDataAccessBodyIdentifier})
+ const dataset=buildHealthDcatDataset({...authority,sector:ctx.sector,id:'dataset-one',title:'Study data',description:'Managed access',
+  publisherRole:'data-holder',dataHolderIdentifier:providerDid,sourceKind:'curated-dataset',sourceReference:study,accessRights,
+  anonymizationStatus:'pseudonymized',healthCategory:['health'],healthDataAccessBodyIdentifier,structuredData:false,
+  distributionIdentifiers:[distribution.id],applicableLegislation:[safe.httpsBaseUrl]})
+ const dataService=buildHealthDcatDataService({...authority,id:'api-one',title:'Study data',endpointUrl:accessUrl,
+  servesDatasetIdentifiers:[dataset.id],accessRights})
+ const provenance=buildResearchStudyProvenanceResource({id:'study-provenance',researchStudyReference:study,recorded:modifiedAt,
+  agents:[{type:'author',who:`PractitionerRole/${safe.resourceUuid}`}]})
+ const paths=[]; let storedRecord
+ const {client}=await fixture(async(path,message)=>{
+  paths.push(path.split('/').slice(-3).join('/'))
+  const {resource}=message.body.data[0]
+  if(path.endsWith('/_search')){
+   assert.deepEqual(resource.meta.claims,{[ClaimsHealthDcatCatalogRecord.identifier]:storedRecord.id})
+   return {iss:providerDid,body:{data:[{response:{status:'200'},resource:storedRecord}]}}
+  }
+  if(resource.resourceType==='CatalogRecord')storedRecord=resource
+  return {iss:providerDid,body:{data:[{response:{status:'200'},resource}]}}
+ })
+ const input={distribution,dataService,dataset,provenance,researchStudyIdentifier:study,catalogRecordIdentifier:'record-one',modifiedAt,operationId:'publish-one'}
+ await assert.rejects(async()=>client.publishResearchStudyDataset({...input,researchStudyIdentifier:'ResearchStudy/foreign'}),/workforce_dataset_binding_invalid/u)
+ assert.equal(paths.length,0)
+ const published=await client.publishResearchStudyDataset(input)
+ assert.equal(published.record.meta.claims[ClaimsHealthDcatCatalogRecord.status],'published')
+ const archived=await client.archiveResearchStudyDataset({recordId:published.record.id,modifiedAt,operationId:'archive-one'})
+ assert.equal(archived.meta.claims[ClaimsHealthDcatCatalogRecord.status],'archived')
+ assert.deepEqual(paths,['org.w3.dcat/Distribution/_batch','org.w3.dcat/DataService/_batch','org.hl7.fhir.r5/Provenance/_batch',
+  'org.w3.dcat/Dataset/_batch','org.w3.dcat/CatalogRecord/_batch','org.w3.dcat/CatalogRecord/_search','org.w3.dcat/CatalogRecord/_batch'])
+})
+
 test('projects a real encrypted phone workforce inventory and exact seven-field licence summary without an email placeholder',async()=>{
  need('getAdministration')
  const f=await fixture(async path=>path.includes('/Employee/')?{iss:tenantIssuer,body:{data:[employeeRow()]}}:{iss:providerDid,body:{data:[licenseRow()]}})

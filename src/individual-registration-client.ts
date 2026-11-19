@@ -6,6 +6,8 @@ import {HealthcareActorRoleCodes} from 'sos-data-utils-ts/healthcare-roles'
 import {readIndividualOrganizationBootstrapReceipt,type IndividualOrganizationBootstrapIdentity} from 'sos-data-utils-ts/individual-registration-contract'
 import {GatewayResponseEntryTypes} from 'sos-data-utils-ts/gateway-response-contract'
 import {type PublicJwk} from 'antifraud-data-utils-ts/cryptography'
+import {normalizeActorContact,normalizeUuid,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
+import {SchemaOrgOrganizationClaim as Organization} from 'antifraud-data-utils-ts/schema-org-claims'
 
 type BaseOptions=Readonly<{
  baseUrl:string;bearerToken:string;ctx:RouteContext;issuerDid:string;recipientDid:string
@@ -23,6 +25,15 @@ function text(value:unknown):string|undefined{return typeof value==='string'&&va
 function entries(value:unknown):Row[]{const root=record(value),body=record(root?.body)??root;return Array.isArray(body?.data)?body.data.map(record).filter((row):row is Row=>!!row):[]}
 function claims(row:Row):Row{return record(record(record(row.resource)?.meta)?.claims)??{}}
 function claim(row:Row,key:string):unknown{const values=claims(row);return values[key]??values[key.replace(/^org\.schema\./u,'')]??values[key.replace(/^org\.hl7\.fhir\.api\./u,'')]}
+
+function personalRegistrationClaim(values:Readonly<Row>,key:string):string|undefined {
+ const full = values[key]
+ const compact = values['@context'] === 'org.schema' ? values[key.replace(/^org\.schema\./u,'')] : undefined
+ if (full !== undefined && compact !== undefined && full !== compact) {
+  throw new TypeError('personal_registration_claim_conflict')
+ }
+ return text(full ?? compact)
+}
 
 /** Reuses opened-wallet custody and verifies the decrypted JWS with the configured GW's public key. */
 export function createIndividualRegistrationSecureAdapter(options:Readonly<{
@@ -69,14 +80,60 @@ export class IndividualRegistrationClient{
    submitError:(status,body)=>new IndividualRegistrationSubmitError(status,body),
    secureTransportAdapter:options.transportProfile==='registered-didcomm-encrypted'?options.secureTransportAdapter:undefined})
  }
- async registerIndividualOrganization(input:RegistrationInput,pollOptions?:PollOptions){
+ private submitRegistration(input:RegistrationInput,pollOptions?:PollOptions){
   const payload=this.message('Family-registration-form-v1.0',input.claims)
   if(input.attachments?.length)payload.attachments=structuredClone([...input.attachments])
-  const registration=await this.exchange('Organization','_transaction',payload,pollOptions)
+  return this.exchange('Organization','_transaction',payload,pollOptions)
+ }
+ async registerIndividualOrganization(input:RegistrationInput,pollOptions?:PollOptions){
   const requestedOrganizationId=text(input.claims['org.schema.Organization.identifier.value']??input.claims['Organization.identifier.value'])
   if(!requestedOrganizationId)throw new TypeError('individual_registration_identity_binding_required')
+  const registration=await this.submitRegistration(input,pollOptions)
   const receipt=readIndividualOrganizationBootstrapReceipt(registration.poll.body,{requestedOrganizationId,expectedProviderDid:this.options.recipientDid})
   return {registration,...receipt}
+ }
+
+ /** Personal OIDC creation may receive a previously registered Organization owned by the same account. */
+ async registerPersonalOrganization(
+  input: RegistrationInput & Readonly<{ verifiedContact: ActorContactInput }>,
+  pollOptions?: PollOptions,
+ ) {
+  if (this.options.transportProfile !== 'oidc-bootstrap-json') throw new TypeError('personal_registration_oidc_required')
+  const { claims: proposed, verifiedContact } = input
+  const proposedId = normalizeUuid(personalRegistrationClaim(proposed, Organization.IdentifierValue))
+  const alternateName = personalRegistrationClaim(proposed, Organization.AlternateName)
+  const contactKind = verifiedContact.contactKind
+  const accountContact = normalizeActorContact(verifiedContact)
+  const contactClaim = contactKind === 'email' ? Organization.OwnerEmail : Organization.OwnerTelephone
+  const matchesContact = (value: string | undefined) => Boolean(value
+    && normalizeActorContact({ contactKind, contact: value }) === accountContact)
+  if (!proposedId || !alternateName || !matchesContact(personalRegistrationClaim(proposed, contactClaim))) {
+   throw new TypeError('personal_registration_request_binding_invalid')
+  }
+
+  const registration = await this.submitRegistration(input, pollOptions)
+  const rows = entries(registration.poll.body).filter(row => row.type === GatewayResponseEntryTypes.FamilyRegistrationOffer)
+  const row = rows[0]
+  if (rows.length !== 1 || !row) throw new TypeError('individual_registration_receipt_invalid')
+  const returned = claims(row)
+  const status = personalRegistrationClaim(returned, 'org.schema.FamilyRegistration.status')
+  const responseStatus = record(row.response)?.status
+  const replay = status === 'already_exists' || status === 'resume_required'
+  if ((replay && responseStatus !== '200') || (!replay && (status !== 'new_created' || responseStatus !== '201'))) {
+   throw new TypeError('personal_registration_status_invalid')
+  }
+  const actualId = text(record(row.resource)?.id)
+  if (!actualId || !normalizeUuid(actualId)) throw new TypeError('personal_registration_receipt_binding_invalid')
+  if (normalizeUuid(actualId) !== proposedId && (!replay
+    || personalRegistrationClaim(returned, Organization.AlternateName) !== alternateName
+    || !matchesContact(personalRegistrationClaim(returned, contactClaim)))) {
+   throw new TypeError('personal_registration_replay_binding_invalid')
+  }
+  const receipt = readIndividualOrganizationBootstrapReceipt(registration.poll.body, {
+   requestedOrganizationId: actualId,
+   expectedProviderDid: this.options.recipientDid,
+  })
+  return { registration, ...receipt, orderConfirmationRequired: status !== 'already_exists' }
  }
  /** The registered subject is resolved by the host from its validated receipt, never a browser authority claim. */
  async confirmIndividualOrganizationOrder(input:Readonly<{offerId:string;registeredSubject:IndividualOrganizationBootstrapIdentity}>,pollOptions?:PollOptions){

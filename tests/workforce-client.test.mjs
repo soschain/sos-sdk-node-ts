@@ -44,6 +44,28 @@ async function serve(handler,run){
 }
 function reply(res,message){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({response:JSON.stringify(message)}))}
 
+for(const [method,action] of [['publishOfferingCatalogue','_publish'],['publishIndividualOffering','_upsert']])test(`publishes unchanged JSON:API data to ${action} through registered controller custody`,async()=>{
+ const document={jsonapi:{version:'1.1'},data:[{type:'Product',id:'example-tracker'}]}
+ const operationId='catalog-publish-'+safe.resourceUuid
+ const path=`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.schema/Catalog/${action}`
+ let receiptTotal=1
+ await serve(async(req,res,message)=>{
+  assert.equal(message.thid,operationId)
+  assert.equal(message.iss,controllerDid)
+  assert.equal(message.aud,providerDid)
+  assert.equal(message.client_id,'registered-controller-client')
+  if(req.url===path){assert.deepEqual(message.body,document);res.writeHead(202);res.end('{}');return}
+  assert.equal(req.url,`${path}-response`)
+  reply(res,{iss:providerDid,aud:controllerDid,thid:operationId,type:'org.schema.catalog-publication',body:{total:receiptTotal}})
+ },async baseUrl=>{
+  const client=new WorkforceClient(options(baseUrl))
+  assert.deepEqual(await client[method]({document,operationId},{intervalMs:0}),{total:1})
+  receiptTotal=0
+  await assert.rejects(client[method]({document,operationId},{intervalMs:0}),error=>
+   error.status===502&&error.body.error==='catalog_offering_publication_receipt_invalid')
+ })
+})
+
 for(const {contact,selectedRole} of [{contact:phone,selectedRole:role},{contact:email,selectedRole:role},{contact:email,selectedRole:MultichannelPermissionRoleClaims.Researcher},{contact:phone,selectedRole:`ISCO-08|${Isco08Occupations.Firefighter.code}`}])test(`provisions canonical ${selectedRole} for exact ${contact.contactKind} employee before its separately bound seat`,async()=>{
  const role=selectedRole,messages=[]
  await serve(async(req,res,message)=>{

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Register a Personal card through the verified-account client and read the
+  gateway's continuation state. Reuse a different Organization ID on retry
+  only when its stored contact and subject name match the request.
+- Use registered controller custody for study administration at the fixed
+  gateway routes. Expose a typed assignment roster from the signed employee
+  directory that includes inactive staff and requires no licence lookup.
+- Use the registered controller's signed gateway transport to publish a
+  tenant's offering catalogue and verify its receipt.
+- Publish an individual offering through the same registered controller
+  without replacing the imported catalogue.
+- Carry the same-organization Demo offering projection in the catalogue
+  response from the authenticated BFF peer.
+- Read public gateway offering catalogues from server-configured tenant
+  sources. Check publisher and sector on every response, preserve the
+  configured local catalogue, and omit withdrawn tenant feeds.
+- Allow a configured Network source to require DCAT advertisement before
+  reading its exact scoped commercial offering feed.
+
 ## 0.6.2
 
 - Reuse the public Antifraud DID/JWK fixture catalog and SOS hosted-route

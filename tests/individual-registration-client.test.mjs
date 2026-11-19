@@ -131,6 +131,44 @@ async function withGatewayRows(rows,run,{issuer=recipientDid,actor='creator'}={}
 }
 const quick={intervalMs:0,timeoutMs:5000}
 
+test('handles creation and personal retries without replaying an already completed Order', async () => {
+ const contact = { contactKind: 'email', contact: safe.firstContactEmail }
+ for (const registrationStatus of ['new_created', 'resume_required', 'already_exists']) {
+  const rows = registrationRows()
+  rows[0].response.status = registrationStatus === 'new_created' ? '201' : '200'
+  rows[0].resource.meta.claims['org.schema.FamilyRegistration.status'] = registrationStatus
+  await withGatewayRows(rows, async client => {
+   const result = await client.registerPersonalOrganization({ claims, verifiedContact: contact }, quick)
+   assert.deepEqual(result.identity, registeredSubject)
+   assert.equal(result.orderConfirmationRequired, registrationStatus !== 'already_exists')
+  }, { actor: 'recipient' })
+ }
+})
+
+test('reuses an existing Organization only when the receipt binds the same contact and subject alias', async () => {
+ const contact = { contactKind: 'email', contact: safe.firstContactEmail }
+ const proposed = { ...claims, 'Organization.identifier.value': safe.demoOrganizationUuids.healthCare }
+ const rows = registrationRows()
+ rows[0].response.status = '200'
+ Object.assign(rows[0].resource.meta.claims, {
+  'org.schema.FamilyRegistration.status': 'already_exists',
+  'org.schema.Organization.owner.email': contact.contact,
+  'org.schema.Organization.alternateName': claims['Organization.alternateName'],
+ })
+ await withGatewayRows(rows, async client => {
+  const result = await client.registerPersonalOrganization({ claims: proposed, verifiedContact: contact }, quick)
+  assert.deepEqual(result.identity, registeredSubject)
+  assert.equal(result.orderConfirmationRequired, false)
+  await assert.rejects(client.registerPersonalOrganization({
+   claims: { ...proposed, 'Organization.alternateName': 'Different subject' }, verifiedContact: contact,
+  }, quick), /personal_registration_replay_binding_invalid/u)
+  await assert.rejects(client.registerPersonalOrganization({
+   claims: { ...proposed, 'Organization.owner.email': safe.individualEmail },
+   verifiedContact: { contactKind: 'email', contact: safe.individualEmail },
+  }, quick), /personal_registration_replay_binding_invalid/u)
+ }, { actor: 'recipient' })
+})
+
 test('preserves GW Organization id, public card alias and provider as separate registration fields',async()=>{
  await withGatewayRows(registrationRows(),async client=>{
   const result=await client.registerIndividualOrganization({claims},quick)

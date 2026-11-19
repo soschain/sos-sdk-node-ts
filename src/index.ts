@@ -48,6 +48,7 @@ export * from './registered-employee-draft-requester.js'
 export * from './madrid-public-registry.js'
 export * from './public-registry-http.js'
 export * from './registered-employee-clinical-care.js'
+export * from './registered-research-study-client.js'
 
 export * from './portal-clinical-document-vault.js'
 

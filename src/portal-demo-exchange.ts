@@ -217,7 +217,10 @@ export type PortalDemoConsentProviderFactory=(input:Readonly<{scope:DemoWorkspac
 export type PortalDemoClinicalDocumentProviderFactory=(input:Readonly<{scope:DemoWorkspaceScope;subjectIdentifier:string;participant:PortalDemoCareParticipant}>)=>Promise<PortalClinicalDocumentVaultProvider>
 export type PortalDemoCareProviderFactory=(input:Readonly<{scope:DemoWorkspaceScope;subjectIdentifier:string;participant:PortalDemoCareParticipant}>)=>Promise<PortalCareVaultProvider>
 export type PortalDemoCareInboxProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant}>)=>Promise<readonly string[]>
-export type PortalDemoCatalogSnapshot=OrganizationCatalogVaultSnapshot&Readonly<{directory?:readonly import('sos-data-utils-ts/portal-demo-service-directory').PortalDemoServiceDirectoryEntry[]}>
+export type PortalDemoCatalogSnapshot=OrganizationCatalogVaultSnapshot&Readonly<{
+ directory?:readonly import('sos-data-utils-ts/portal-demo-service-directory').PortalDemoServiceDirectoryEntry[]
+ offerings?:readonly import('antifraud-data-utils-ts/public-offering-catalog').PublicOffering[]
+}>
 export type PortalDemoCatalogProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;catalog:OrganizationCatalogVaultOperation}>)=>Promise<PortalDemoCatalogSnapshot>
 export type PortalDemoRegistrationProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;command:SubjectRegistrationCommand}>)=>Promise<ProvisionalSubjectRegistrationReceipt>
 export type PortalDemoRegistrationReadProvider=(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;registrationId:string}>)=>Promise<ProvisionalSubjectRegistrationReceipt>
