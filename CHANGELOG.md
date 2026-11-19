@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Reuse the public Antifraud DID/JWK fixture catalog and SOS hosted-route
+  examples for all agreement-key resolver cases. Pin their exact released
+  versions; keep invalid material as untrusted fixture data.
+
 - Add a public did:web agreement-key resolver independent of registered PQC
   signing-profile admission. Preserve declared hybrid-key order and public
   metadata, require exact document/method/controller bindings, and restrict
