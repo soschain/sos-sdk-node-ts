@@ -13,6 +13,8 @@
 - Read public gateway offering catalogues from server-configured tenant
   sources. Check publisher and sector on every response, preserve the
   configured local catalogue, and omit withdrawn tenant feeds.
+- Allow a configured Network source to require DCAT advertisement before
+  reading its exact scoped commercial offering feed.
 
 ## 0.6.2
 
