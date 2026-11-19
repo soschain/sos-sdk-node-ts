@@ -40,6 +40,21 @@ test('retains verified-email enrollment compatibility without a synthetic phone/
  const s=await setup('email'),resolve=need(),result=await resolve(s.options,s.input)
  assert.equal(result.actorDid,s.profile.actorDid);assert.equal(result.recordedRole,role)
 })
+test('opens study custody for a completed phone enrollment and denies a revoked session before contacting the gateway',async()=>{
+ const s=await setup()
+ let fetches=0
+ const options={...s.options,resolveGateway:()=>({
+  resolveRecipientJwk:async()=>{throw new Error('revoked_session_must_not_resolve_keys')},
+  resolveGatewaySigningJwk:async()=>{throw new Error('revoked_session_must_not_resolve_keys')},
+  smartTokenVerification:{algorithm:'ES384',resolveSigningJwk:async()=>{throw new Error('no_token_expected')}},
+ }),fetchImpl:async()=>{fetches++;throw new Error('revoked_session_must_not_contact_gateway')}}
+ const opened=await api.openRegisteredEmployeeResearchStudy(options,{...s.input,idToken:'synthetic-firebase-token'})
+ assert.deepEqual(opened.profile,{actorDid:s.profile.actorDid,routeContext})
+ assert.equal(JSON.stringify(opened).includes(seed),false)
+ await s.vault.delete(collections.walletSessions,s.session.id)
+ await assert.rejects(opened.requestStudyAccess(safe.resourceUuid),api.RegisteredEmployeeDraftRequesterDeniedError)
+ assert.equal(fetches,0)
+})
 test('admits the completed organization under its configured enrollment host without a lookup-directory tenant entry',async()=>{
  const s=await setup(),resolve=need()
  const result=await resolve({vault:s.vault,sealer:s.sealer,collections,hostAuthorityDid,gatewayBaseUrl:safe.httpsBaseUrl,now},s.input)
