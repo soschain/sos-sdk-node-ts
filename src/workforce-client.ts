@@ -174,6 +174,17 @@ export class WorkforceClient{
   }
   return {resourceType,operationId,result}
  }
+ /** Lists the registered controller's ResearchStudies using the tenant-scoped FHIR search. */
+ searchResearchStudies(input:Readonly<{
+  operationId:string
+  claims:Readonly<Record<string,readonly string[]>>
+ }>,pollOptions?:PollOptions){
+  return this.submitResearchAdministration({
+   resourceType:'ResearchStudy',action:'_search',operationId:input.operationId,
+   body:{resourceType:'Bundle',type:'batch',data:[{resource:{resourceType:'Parameters',meta:{claims:input.claims}}}]},
+  },pollOptions)
+ }
+
  /** Submits a server-built research administration Bundle through registered controller custody. */
  async submitResearchAdministration(input:Readonly<{
   resourceType:'ResearchStudy'|'Group'|'Consent'|'Communication'|'SubscriptionTopic'|'Subscription'

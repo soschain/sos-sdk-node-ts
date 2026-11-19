@@ -80,6 +80,21 @@ test('registered controller uses fixed research routes and verifies the correlat
  await assert.rejects(()=>client.submitResearchAdministration({resourceType:'Patient',action:'_search',operationId:'research-study-test',body}),/workforce_research_route_invalid/u)
  assert.equal(messages.length,2)
 })
+
+test('reads research studies through the registered tenant without a caller-built route or Bundle',async()=>{
+ const claims={'ResearchStudy.status':['draft']}
+ const body={resourceType:'Bundle',type:'searchset',data:[]}
+ const {client,messages}=await fixture(async(path,message)=>{
+  assert.equal(path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.hl7.fhir.r5/ResearchStudy/_search`)
+  assert.deepEqual(message.body,{resourceType:'Bundle',type:'batch',data:[{
+   resource:{resourceType:'Parameters',meta:{claims}},
+  }]})
+  return {iss:providerDid,body}
+ })
+ const result=await client.searchResearchStudies({operationId:'research-study-list',claims})
+ assert.deepEqual(result.poll.body.body,body)
+ assert.equal(messages.length,2)
+})
 test('projects a real encrypted phone workforce inventory and exact seven-field licence summary without an email placeholder',async()=>{
  need('getAdministration')
  const f=await fixture(async path=>path.includes('/Employee/')?{iss:tenantIssuer,body:{data:[employeeRow()]}}:{iss:providerDid,body:{data:[licenseRow()]}})
