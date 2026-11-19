@@ -15,12 +15,19 @@ import type {OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-life
 import type {OrganizationWorkflowFlatEntry} from 'sos-data-utils-ts/organization-workflow-access'
 import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
 import {normalizeDirectoryFlatClaimsResource,type DirectoryResource,type DirectoryResourceType} from 'sos-data-utils-ts/place-service-directory'
-import {normalizeHealthDcatResource} from 'sos-data-utils-ts/health-dcat'
+import {buildResearchStudyDatasetPublication,ClaimsHealthDcatCatalogRecord,ClaimsHealthDcatDataset,ClaimsHealthDcatDataService,
+ normalizeHealthDcatResource,updateHealthDcatCatalogRecordStatus} from 'sos-data-utils-ts/health-dcat'
+import {normalizeProvenanceR5FlatClaimsResource} from 'sos-data-utils-ts/provenance'
 import {readTenantPublicOfferingCatalog} from './public-offering-catalog-client.js'
 import {ClaimConsent} from 'fhir-data-utils-ts'
 import {projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
 
 type Row=Record<string,unknown>
+type CatalogFormat='org.schema'|'org.hl7.fhir.r5'|'org.w3.dcat'
+type CatalogSearchType=DirectoryResourceType|'HealthcareService'|'Dataset'|'CatalogRecord'
+type CatalogWriteType='HealthcareService'|'Service'|'Provenance'|'Dataset'|'CatalogRecord'|'Distribution'|'DataService'
+const validCatalogWriteId=(format:CatalogFormat,id:unknown):boolean=>typeof id==='string'
+ &&(format==='org.w3.dcat'?/^[A-Za-z0-9._:-]{1,256}$/u:/^[A-Za-z0-9.-]{1,64}$/u).test(id)
 const record=(value:unknown):Row|undefined=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Row:undefined
 const text=(value:unknown):string=>typeof value==='string'?value.trim():''
 function claims(row:Row):Row{return record(record(record(row.resource)?.meta)?.claims)??{}}
@@ -244,25 +251,8 @@ export class WorkforceClient{
 
  /** Reads the selected controller's internal catalogue and its directory and DCAT projections. */
  async getOrganizationCatalog(input:Readonly<{operationId:string}>,pollOptions?:PollOptions){
-  const identity=this.controller()
-  const {operationId}=input
-  if(typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,180}$/u.test(operationId))throw new TypeError('workforce_catalog_operation_invalid')
-  const search=async <T>(format:'org.schema'|'org.hl7.fhir.r5'|'org.w3.dcat',
-   resourceType:DirectoryResourceType|'HealthcareService'|'Dataset'|'CatalogRecord',parse:(resource:Row)=>T)=>{
-   const body={resourceType:'Bundle',type:'batch',data:[{resource:{resourceType,id:'search',meta:{claims:{}}}}]}
-   const result=await this.transport.exchange(`${this.prefix}/organization/${format}/${resourceType}/_search`,
-    this.administrationMessage(body,`${operationId}-${resourceType}`),identity.providerDid,pollOptions)
-   const envelope=record(result.poll.body)
-   const response=record(envelope?.body)??envelope
-   if(!Array.isArray(response?.data))throw new Error('workforce_catalog_response_invalid')
-   return response.data.map((entry:unknown)=>{
-    const row=record(entry),status=Number(record(row?.response)?.status),resource=record(row?.resource)
-    if(Number.isInteger(status)&&status>=400&&status<=599)throw new WorkforceSubmitError(status,result.poll.body)
-    if(status!==200||resource?.resourceType!==resourceType||typeof resource.id!=='string'||!resource.id
-     ||!record(record(resource.meta)?.claims))throw new Error('workforce_catalog_resource_invalid')
-    return parse(resource)
-   })
-  }
+  const search=<T>(format:CatalogFormat,resourceType:CatalogSearchType,parse:(resource:Row)=>T)=>
+   this.searchCatalogResources(format,resourceType,{},input.operationId,parse,pollOptions)
   const [organizations,places,healthcareServices,services,products,datasets,records]=await Promise.all([
    search('org.schema','Organization',normalizeDirectoryFlatClaimsResource),
    search('org.schema','Place',normalizeDirectoryFlatClaimsResource),
@@ -275,36 +265,110 @@ export class WorkforceClient{
   return {organizations,places,healthcareServices,services,products,datasets,records}
  }
 
+ /** Writes a study dataset and publishes its discoverable record only after its referenced resources succeed. */
+ async publishResearchStudyDataset(input:Readonly<{
+  distribution:unknown;dataService:unknown;dataset:unknown;provenance:unknown;researchStudyIdentifier:string;
+  catalogRecordIdentifier:string;modifiedAt:string;operationId:string
+ }>,pollOptions?:PollOptions){
+  const authority=this.catalogAuthority()
+  const {researchStudyIdentifier,operationId}=input
+  if(typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,180}$/u.test(operationId))throw new TypeError('workforce_catalog_operation_invalid')
+  const distribution=normalizeHealthDcatResource(input.distribution),dataService=normalizeHealthDcatResource(input.dataService)
+  const dataset=normalizeHealthDcatResource(input.dataset),provenance=normalizeProvenanceR5FlatClaimsResource(input.provenance)
+  const distributions=dataset.meta.claims[ClaimsHealthDcatDataset.distribution]
+  const served=dataService.meta.claims[ClaimsHealthDcatDataService.servesDataset]
+  if(distribution.resourceType!=='Distribution'||dataService.resourceType!=='DataService'||dataset.resourceType!=='Dataset'
+   ||!/^ResearchStudy\/[A-Za-z0-9.-]{1,64}$/u.test(researchStudyIdentifier)
+   ||!provenance.meta.claims['Provenance.target']?.includes(researchStudyIdentifier)
+   ||dataset.meta.claims[ClaimsHealthDcatDataset.source]!==researchStudyIdentifier
+   ||dataset.meta.claims[ClaimsHealthDcatDataset.publisher]!==authority.organizationIdentifier
+   ||dataService.meta.claims[ClaimsHealthDcatDataService.publisher]!==authority.organizationIdentifier
+   ||!Array.isArray(distributions)||!distributions.includes(distribution.id)||!Array.isArray(served)||!served.includes(dataset.id)){
+   throw new TypeError('workforce_dataset_binding_invalid')
+  }
+  const publication=buildResearchStudyDatasetPublication({...authority,dataset,researchStudyIdentifier,
+   provenanceReference:`Provenance/${provenance.id}`,catalogRecordIdentifier:input.catalogRecordIdentifier,status:'published',modifiedAt:input.modifiedAt})
+  if([distribution,dataService,publication.dataset,publication.record].some(resource=>!validCatalogWriteId('org.w3.dcat',resource.id))
+   ||!validCatalogWriteId('org.hl7.fhir.r5',provenance.id))throw new TypeError('workforce_dataset_binding_invalid')
+  await this.writeCatalogResource('org.w3.dcat','Distribution','PUT',distribution,`${operationId}-distribution`,pollOptions)
+  await this.writeCatalogResource('org.w3.dcat','DataService','PUT',dataService,`${operationId}-data-service`,pollOptions)
+  await this.writeCatalogResource('org.hl7.fhir.r5','Provenance','PUT',provenance,`${operationId}-provenance`,pollOptions)
+  await this.writeCatalogResource('org.w3.dcat','Dataset','POST',publication.dataset,`${operationId}-dataset`,pollOptions)
+  await this.writeCatalogResource('org.w3.dcat','CatalogRecord','POST',publication.record,`${operationId}-record`,pollOptions)
+  return publication
+ }
+
+ /** Changes only the exact persisted CatalogRecord's editorial status. */
+ async archiveResearchStudyDataset(input:Readonly<{recordId:string;modifiedAt:string;operationId:string}>,pollOptions?:PollOptions){
+  const authority=this.catalogAuthority(),{recordId,operationId}=input
+  if(!validCatalogWriteId('org.w3.dcat',recordId))throw new TypeError('workforce_dataset_binding_invalid')
+  const records=await this.searchCatalogResources('org.w3.dcat','CatalogRecord',{[ClaimsHealthDcatCatalogRecord.identifier]:recordId},
+   operationId,normalizeHealthDcatResource,pollOptions)
+  const matching=records.filter(resource=>resource.id===recordId&&resource.meta.claims[ClaimsHealthDcatCatalogRecord.identifier]===recordId)
+  if(matching.length>1)throw new Error('workforce_catalog_resource_invalid')
+  const [record]=matching
+  if(!record)throw new WorkforceSubmitError(404,{error:'catalog_record_not_found'})
+  const archived=updateHealthDcatCatalogRecordStatus({...authority,record,status:'archived',modifiedAt:input.modifiedAt})
+  await this.writeCatalogResource('org.w3.dcat','CatalogRecord','PUT',archived,`${operationId}-archive`,pollOptions)
+  return archived
+ }
+
+ private catalogAuthority(){
+  const {issuerDid,providerDid}=this.controller()
+  return {organizationIdentifier:providerDid,controllerIdentifier:issuerDid,actingControllerIdentifier:issuerDid}
+ }
+
+ private async searchCatalogResources<T>(format:CatalogFormat,resourceType:CatalogSearchType,claims:Readonly<Row>,
+  operationId:string,parse:(resource:Row)=>T,pollOptions?:PollOptions){
+  const identity=this.controller()
+  if(typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,180}$/u.test(operationId))throw new TypeError('workforce_catalog_operation_invalid')
+  const body={resourceType:'Bundle',type:'batch',data:[{resource:{resourceType,id:'search',meta:{claims}}}]}
+  const result=await this.transport.exchange(`${this.prefix}/organization/${format}/${resourceType}/_search`,
+   this.administrationMessage(body,`${operationId}-${resourceType}`),identity.providerDid,pollOptions)
+  const envelope=record(result.poll.body)
+  const response=record(envelope?.body)??envelope
+  if(!Array.isArray(response?.data))throw new Error('workforce_catalog_response_invalid')
+  return response.data.map((entry:unknown)=>{
+   const row=record(entry),status=Number(record(row?.response)?.status),resource=record(row?.resource)
+   if(Number.isInteger(status)&&status>=400&&status<=599)throw new WorkforceSubmitError(status,result.poll.body)
+   if(status!==200||resource?.resourceType!==resourceType||typeof resource.id!=='string'||!resource.id
+    ||!record(record(resource.meta)?.claims))throw new Error('workforce_catalog_resource_invalid')
+   return parse(resource)
+  })
+ }
+
  /** Creates the internal HealthcareService used for scheduling and clinical routing. */
  async createHealthcareService(input:Readonly<{
   resource:Readonly<{resourceType:'HealthcareService';id:string;meta:Readonly<{claims:Readonly<Row>}>}>
   operationId:string
  }>,pollOptions?:PollOptions){
   if(input.resource?.resourceType!=='HealthcareService'||!record(input.resource.meta?.claims))throw new TypeError('workforce_service_resource_invalid')
-  return this.writeServiceResource('org.hl7.fhir.r5','HealthcareService','POST',input.resource,input.operationId,pollOptions)
+  return this.writeCatalogResource('org.hl7.fhir.r5','HealthcareService','POST',input.resource,input.operationId,pollOptions)
  }
 
  /** Upserts the public Schema.org directory projection. Commercial media and prices use the offering catalogue. */
  async publishDirectoryService(input:Readonly<{resource:DirectoryResource;operationId:string}>,pollOptions?:PollOptions){
   const resource=normalizeDirectoryFlatClaimsResource(input.resource)
   if(resource.resourceType!=='Service')throw new TypeError('workforce_service_resource_invalid')
-  return this.writeServiceResource('org.schema','Service','PUT',resource,input.operationId,pollOptions)
+  return this.writeCatalogResource('org.schema','Service','PUT',resource,input.operationId,pollOptions)
  }
 
- private async writeServiceResource(format:'org.hl7.fhir.r5'|'org.schema',resourceType:'HealthcareService'|'Service',
+ private async writeCatalogResource(format:CatalogFormat,resourceType:CatalogWriteType,
   method:'POST'|'PUT',resource:Readonly<{id:string}>,operationId:string,pollOptions?:PollOptions){
   const identity=this.controller()
-  if(typeof resource.id!=='string'||!/^[A-Za-z0-9.-]{1,64}$/u.test(resource.id))throw new TypeError('workforce_service_resource_invalid')
+  if(!validCatalogWriteId(format,resource.id))throw new TypeError(format==='org.w3.dcat'?'workforce_dataset_binding_invalid':'workforce_service_resource_invalid')
   if(typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,200}$/u.test(operationId))throw new TypeError('workforce_service_operation_invalid')
-  const entry={...(resourceType==='Service'?{type:'Service-schema.org'}:{}),request:{method,url:`${resourceType}/${resource.id}`},resource}
+  const type=format==='org.w3.dcat'?`${resourceType}-health-dcat`:resourceType==='Service'?'Service-schema.org':undefined
+  const entry={...(type?{type}:{}),request:{method,url:`${resourceType}/${resource.id}`},resource}
   const body={resourceType:'Bundle',type:'batch',data:[entry]}
   const result=await this.transport.exchange(`${this.prefix}/organization/${format}/${resourceType}/_batch`,
    this.administrationMessage(body,operationId),identity.providerDid,pollOptions)
   const [receipt]=gatewayResponseEntries(result.poll.body)
   const status=Number(record(receipt?.response)?.status)
   if(Number.isInteger(status)&&status>=400&&status<=599)throw new WorkforceSubmitError(status,result.poll.body)
-  const confirmed=confirmedTarget(result.poll.body,resource.id,'workforce_service_receipt_invalid')
-  if(confirmed.resourceType!==resourceType)throw new Error('workforce_service_receipt_invalid')
+  const error=format==='org.w3.dcat'||resourceType==='Provenance'?'workforce_dataset_receipt_invalid':'workforce_service_receipt_invalid'
+  const confirmed=confirmedTarget(result.poll.body,resource.id,error)
+  if(confirmed.resourceType!==resourceType)throw new Error(error)
   return {resourceId:resource.id}
  }
  private async publishCatalogueDocument(action:'_publish'|'_upsert',input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){

@@ -13,6 +13,8 @@ import {ClaimConsent,ConsentStatuses} from 'fhir-data-utils-ts'
 import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
 import {buildServiceDirectoryResource,normalizeDirectoryFlatClaimsResource} from 'sos-data-utils-ts/place-service-directory'
 import {HealthcareServiceClaim} from 'fhir-data-utils-ts/claims'
+import {buildHealthDcatDataset,buildHealthDcatDataService,buildHealthDcatDistribution,ClaimsHealthDcatCatalogRecord} from 'sos-data-utils-ts/health-dcat'
+import {buildResearchStudyProvenanceResource} from 'sos-data-utils-ts/provenance'
 import {OrganizationRegistrationWallet} from '../dist/organization-registration-wallet.js'
 import {createVerifiedGatewaySecureAdapter} from '../dist/registered-gateway-transport.js'
 import {WorkforceClient} from '../dist/workforce-client.js'
@@ -183,6 +185,41 @@ test('reads one registered organization catalogue across the governed directory,
  assert.deepEqual((await published.getPublishedOfferings()).map(product=>product.id),[offering.id])
  await assert.rejects(published.getPublishedOfferings(),/public_offering_api_scope_mismatch/u)
 })
+test('publishes a study dataset with Provenance and archives only its persisted record',async()=>{
+ const authority={organizationIdentifier:providerDid,controllerIdentifier:controllerDid,actingControllerIdentifier:controllerDid}
+ const study='ResearchStudy/study-one',modifiedAt='2026-09-10T00:00:00.000Z',accessUrl=safe.httpsBaseUrl
+ const accessRights='NON_PUBLIC',healthDataAccessBodyIdentifier='Organization/hdab-one'
+ const distribution=buildHealthDcatDistribution({...authority,id:'distribution-one',title:'Study data',accessUrl,format:'JSON',accessRights,healthDataAccessBodyIdentifier})
+ const dataset=buildHealthDcatDataset({...authority,sector:ctx.sector,id:'dataset-one',title:'Study data',description:'Managed access',
+  publisherRole:'data-holder',dataHolderIdentifier:providerDid,sourceKind:'curated-dataset',sourceReference:study,accessRights,
+  anonymizationStatus:'pseudonymized',healthCategory:['health'],healthDataAccessBodyIdentifier,structuredData:false,
+  distributionIdentifiers:[distribution.id],applicableLegislation:[safe.httpsBaseUrl]})
+ const dataService=buildHealthDcatDataService({...authority,id:'api-one',title:'Study data',endpointUrl:accessUrl,
+  servesDatasetIdentifiers:[dataset.id],accessRights})
+ const provenance=buildResearchStudyProvenanceResource({id:'study-provenance',researchStudyReference:study,recorded:modifiedAt,
+  agents:[{type:'author',who:`PractitionerRole/${safe.resourceUuid}`}]})
+ const paths=[]; let storedRecord
+ const {client}=await fixture(async(path,message)=>{
+  paths.push(path.split('/').slice(-3).join('/'))
+  const {resource}=message.body.data[0]
+  if(path.endsWith('/_search')){
+   assert.deepEqual(resource.meta.claims,{[ClaimsHealthDcatCatalogRecord.identifier]:storedRecord.id})
+   return {iss:providerDid,body:{data:[{response:{status:'200'},resource:storedRecord}]}}
+  }
+  if(resource.resourceType==='CatalogRecord')storedRecord=resource
+  return {iss:providerDid,body:{data:[{response:{status:'200'},resource}]}}
+ })
+ const input={distribution,dataService,dataset,provenance,researchStudyIdentifier:study,catalogRecordIdentifier:'record-one',modifiedAt,operationId:'publish-one'}
+ await assert.rejects(async()=>client.publishResearchStudyDataset({...input,researchStudyIdentifier:'ResearchStudy/foreign'}),/workforce_dataset_binding_invalid/u)
+ assert.equal(paths.length,0)
+ const published=await client.publishResearchStudyDataset(input)
+ assert.equal(published.record.meta.claims[ClaimsHealthDcatCatalogRecord.status],'published')
+ const archived=await client.archiveResearchStudyDataset({recordId:published.record.id,modifiedAt,operationId:'archive-one'})
+ assert.equal(archived.meta.claims[ClaimsHealthDcatCatalogRecord.status],'archived')
+ assert.deepEqual(paths,['org.w3.dcat/Distribution/_batch','org.w3.dcat/DataService/_batch','org.hl7.fhir.r5/Provenance/_batch',
+  'org.w3.dcat/Dataset/_batch','org.w3.dcat/CatalogRecord/_batch','org.w3.dcat/CatalogRecord/_search','org.w3.dcat/CatalogRecord/_batch'])
+})
+
 test('projects a real encrypted phone workforce inventory and exact seven-field licence summary without an email placeholder',async()=>{
  need('getAdministration')
  const f=await fixture(async path=>path.includes('/Employee/')?{iss:tenantIssuer,body:{data:[employeeRow()]}}:{iss:providerDid,body:{data:[licenseRow()]}})
