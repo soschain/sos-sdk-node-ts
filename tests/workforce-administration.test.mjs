@@ -10,6 +10,7 @@ import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
 import {OrganizationLifecycleClaim} from 'sos-data-utils-ts/organization-lifecycle-contract'
 import {buildTestNetworkControllerWorkflowAssignment,OrganizationWorkflowGroupKinds,OrganizationWorkflowCapabilities} from 'sos-data-utils-ts/organization-workflow-access'
 import {ClaimConsent,ConsentStatuses} from 'fhir-data-utils-ts'
+import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
 import {OrganizationRegistrationWallet} from '../dist/organization-registration-wallet.js'
 import {createVerifiedGatewaySecureAdapter} from '../dist/registered-gateway-transport.js'
 import {WorkforceClient} from '../dist/workforce-client.js'
@@ -94,6 +95,24 @@ test('reads research studies through the registered tenant without a caller-buil
  const result=await client.searchResearchStudies({operationId:'research-study-list',claims})
  assert.deepEqual(result.poll.body.body,body)
  assert.equal(messages.length,2)
+})
+
+test('reads the registered study team and only the consent records matching the study and selected actor',async()=>{
+ const studyId=safe.resourceUuid
+ const partyReference=`PractitionerRole/${safe.demoOrganizationUuids.healthCare}`
+ const requests=[]
+ const {client,messages}=await fixture(async(path,message)=>{
+  requests.push([path.split('/').slice(-2).join('/'),message.body.data[0].resource.meta.claims])
+  return {iss:providerDid,body:{resourceType:'Bundle',type:'searchset',data:[]}}
+ })
+ await client.searchResearchReviewTeam({studyId,operationId:'research-team-search'})
+ await client.searchResearchStudyConsents({studyId,partyReference,operationId:'research-consent-search'})
+ assert.deepEqual(requests,[
+  ['Group/_search',{'Group.identifier':[buildResearchStudyReviewTeamGroupSearch(studyId).identifier]}],
+  ['Consent/_search',{[ClaimConsent.sourceReference]:[`ResearchStudy/${studyId}`],[ClaimConsent.actorIdentifier]:[partyReference]}],
+ ])
+ await assert.rejects(async()=>client.searchResearchStudyConsents({studyId,partyReference:'Patient/synthetic',operationId:'research-denied'}),/workforce_research_study_party_invalid/u)
+ assert.equal(messages.length,4)
 })
 test('projects a real encrypted phone workforce inventory and exact seven-field licence summary without an email placeholder',async()=>{
  need('getAdministration')

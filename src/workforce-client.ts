@@ -13,6 +13,8 @@ import type {ServerProfileKeyDescriptor} from './server-profile-custody-keys.js'
 import {IdentityAuthRequestFields} from 'sos-data-utils-ts/identity-auth-wire-contract'
 import type {OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-lifecycle-contract'
 import type {OrganizationWorkflowFlatEntry} from 'sos-data-utils-ts/organization-workflow-access'
+import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
+import {ClaimConsent} from 'fhir-data-utils-ts'
 import {projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
 
 type Row=Record<string,unknown>
@@ -179,9 +181,31 @@ export class WorkforceClient{
   operationId:string
   claims:Readonly<Record<string,readonly string[]>>
  }>,pollOptions?:PollOptions){
+  return this.searchResearchResource('ResearchStudy',input.operationId,input.claims,pollOptions)
+ }
+
+ /** Finds the Group defined by the persisted study-to-team identifier. */
+ searchResearchReviewTeam(input:Readonly<{studyId:string;operationId:string}>,pollOptions?:PollOptions){
+  const {identifier}=buildResearchStudyReviewTeamGroupSearch(input.studyId)
+  return this.searchResearchResource('Group',input.operationId,{'Group.identifier':[identifier]},pollOptions)
+ }
+
+ /** Lists study-bound Consent records, optionally restricted to one PractitionerRole. */
+ searchResearchStudyConsents(input:Readonly<{studyId:string;partyReference?:string;operationId:string}>,pollOptions?:PollOptions){
+  const {studyId,partyReference,operationId}=input
+  if(typeof studyId!=='string'||!/^[-A-Za-z0-9.]{1,64}$/u.test(studyId))throw new TypeError('workforce_research_study_id_invalid')
+  if(partyReference!==undefined&&(typeof partyReference!=='string'||!/^PractitionerRole\/[-A-Za-z0-9.]{1,64}$/u.test(partyReference)))throw new TypeError('workforce_research_study_party_invalid')
+  return this.searchResearchResource('Consent',operationId,{
+   [ClaimConsent.sourceReference]:[`ResearchStudy/${studyId}`],
+   ...(partyReference===undefined?{}:{[ClaimConsent.actorIdentifier]:[partyReference]}),
+  },pollOptions)
+ }
+
+ private searchResearchResource(resourceType:'ResearchStudy'|'Group'|'Consent',operationId:string,
+  claims:Readonly<Record<string,readonly string[]>>,pollOptions?:PollOptions){
   return this.submitResearchAdministration({
-   resourceType:'ResearchStudy',action:'_search',operationId:input.operationId,
-   body:{resourceType:'Bundle',type:'batch',data:[{resource:{resourceType:'Parameters',meta:{claims:input.claims}}}]},
+   resourceType,action:'_search',operationId,
+   body:{resourceType:'Bundle',type:'batch',data:[{resource:{resourceType:'Parameters',meta:{claims}}}]},
   },pollOptions)
  }
 
