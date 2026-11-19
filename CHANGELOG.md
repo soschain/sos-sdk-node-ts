@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Register a Personal card through the verified-account client and read the
+  gateway's continuation state. Reuse a different Organization ID on retry
+  only when its stored contact and subject name match the request.
 - Use registered controller custody for study administration at the fixed
   gateway routes. Expose a typed assignment roster from the signed employee
   directory that includes inactive staff and requires no licence lookup.
