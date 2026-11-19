@@ -152,6 +152,10 @@
       "types": "./dist/subject-card-provider-catalog-client.d.ts",
       "default": "./dist/subject-card-provider-catalog-client.js"
     },
+    "./public-offering-catalog-client": {
+      "types": "./dist/public-offering-catalog-client.d.ts",
+      "default": "./dist/public-offering-catalog-client.js"
+    },
     "./registered-profile-access": {
       "types": "./dist/registered-profile-access.d.ts",
       "default": "./dist/registered-profile-access.js"

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Read public gateway offering catalogues from server-configured tenant
+  sources. Check publisher and sector on every response, preserve the
+  configured local catalogue, and omit withdrawn tenant feeds.
+
 ## 0.6.2
 
 - Reuse the public Antifraud DID/JWK fixture catalog and SOS hosted-route
