@@ -12,6 +12,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./did-web-key-agreement": {
+      "types": "./dist/did-web-key-agreement.d.ts",
+      "default": "./dist/did-web-key-agreement.js"
+    },
     "./public-registry-http": {
       "types": "./dist/public-registry-http.d.ts",
       "default": "./dist/public-registry-http.js"

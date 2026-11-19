@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Add a public did:web agreement-key resolver independent of registered PQC
+  signing-profile admission. Preserve declared hybrid-key order and public
+  metadata, require exact document/method/controller bindings, and restrict
+  loopback overrides to an explicit trusted test capability. Select canonical
+  did:web or the fixed existing hosted-well-known publication path explicitly,
+  without fallback. The existing
+  registered resolver remains unchanged; consumer migration and publication
+  are separate work.
+
 ## 0.6.1
 
 - Add explicit Demo signing-realm constructors for ordinary SHCs and the
