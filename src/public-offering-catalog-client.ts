@@ -12,23 +12,27 @@ function readSources(json: string | undefined): readonly OfferingSource[] {
   if (json.length > maximumBytes) throw invalid()
   const items: unknown = JSON.parse(json)
   if (!Array.isArray(items)) throw invalid()
-  return items.map(item => {
-    if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some(key =>
-      !['gatewayOrigin', 'tenantId', 'jurisdiction', 'sector', 'publisherId', 'discovery'].includes(key))) throw invalid()
-    const { gatewayOrigin, tenantId, jurisdiction, sector, publisherId, discovery } = item
-    if (typeof gatewayOrigin !== 'string' || typeof tenantId !== 'string' || !pathSegment.test(tenantId)
-      || tenantId.toLowerCase() === 'host' || typeof jurisdiction !== 'string' || !pathSegment.test(jurisdiction)
-      || typeof sector !== 'string' || !pathSegment.test(sector)
-      || typeof publisherId !== 'string' || !publisherId.startsWith('did:web:')
-      || (discovery !== undefined && discovery !== 'dcat')) throw invalid()
-    const origin = new URL(gatewayOrigin)
-    const localHttp = origin.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)
-    if ((origin.protocol !== 'https:' && !localHttp) || origin.username || origin.password
-      || origin.search || origin.hash || origin.pathname !== '/') throw invalid()
-    const scope = { tenantId, jurisdiction, version: 'v1', sector }
-    return { url: new URL(buildGatewayDataspaceOfferingCatalogPath(scope), origin), publisherId, sector,
-      ...(discovery === 'dcat' ? { catalogUrl: new URL(buildGatewayDataspaceCatalogArtifactPath(scope), origin) } : {}) }
-  })
+  return items.map(readSource)
+}
+
+function readSource(item: unknown): OfferingSource {
+  const invalid = () => new TypeError('public_offering_api_source_invalid')
+  const source = record(item)
+  if (!source || Object.keys(source).some(key =>
+    !['gatewayOrigin', 'tenantId', 'jurisdiction', 'sector', 'publisherId', 'discovery'].includes(key))) throw invalid()
+  const { gatewayOrigin, tenantId, jurisdiction, sector, publisherId, discovery } = source
+  if (typeof gatewayOrigin !== 'string' || typeof tenantId !== 'string' || !pathSegment.test(tenantId)
+    || tenantId.toLowerCase() === 'host' || typeof jurisdiction !== 'string' || !pathSegment.test(jurisdiction)
+    || typeof sector !== 'string' || !pathSegment.test(sector)
+    || typeof publisherId !== 'string' || !publisherId.startsWith('did:web:')
+    || (discovery !== undefined && discovery !== 'dcat')) throw invalid()
+  const origin = new URL(gatewayOrigin)
+  const localHttp = origin.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)
+  if ((origin.protocol !== 'https:' && !localHttp) || origin.username || origin.password
+    || origin.search || origin.hash || origin.pathname !== '/') throw invalid()
+  const scope = { tenantId, jurisdiction, version: 'v1', sector }
+  return { url: new URL(buildGatewayDataspaceOfferingCatalogPath(scope), origin), publisherId, sector,
+    ...(discovery === 'dcat' ? { catalogUrl: new URL(buildGatewayDataspaceCatalogArtifactPath(scope), origin) } : {}) }
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -87,19 +91,28 @@ export async function readNetworkPublicOfferingCatalog(input: Readonly<{
   const local = readPublicOfferingCatalogJson(input.catalogJson, false)
   const sources = readSources(input.sourcesJson)
   const request = input.fetchImpl ?? fetch
-  const results = await Promise.all(sources.map(async source => {
-    const signal = AbortSignal.timeout(8_000)
-    if (source.catalogUrl) {
-      const catalog = await fetchPublicJson(request, source.catalogUrl, signal, 'application/ld+json, application/json')
-      if (catalog === undefined || !advertisesOfferingFeed(catalog, source)) return []
-    }
-    const feed = await fetchPublicJson(request, source.url, signal, 'application/json')
-    if (feed === undefined) return []
-    const offerings = readPublicOfferingCatalog(feed)
-    if (offerings.some(offering => offering.demo || offering.publisher.id !== source.publisherId || offering.sector !== source.sector)) {
-      throw new TypeError('public_offering_api_scope_mismatch')
-    }
-    return offerings
-  }))
+  const results = await Promise.all(sources.map(source => readOfferingSource(request, source)))
   return readPublicOfferingCatalog([...local, ...results.flat()])
+}
+
+/** Reads the public feed for a known gateway scope, with no controller credentials. */
+export function readTenantPublicOfferingCatalog(input: Readonly<{
+  gatewayOrigin: string; tenantId: string; jurisdiction: string; sector: string; publisherId: string
+}>, fetchImpl: typeof fetch = fetch) {
+  return readOfferingSource(fetchImpl, readSource(input))
+}
+
+async function readOfferingSource(request: typeof fetch, source: OfferingSource) {
+  const signal = AbortSignal.timeout(8_000)
+  if (source.catalogUrl) {
+    const catalog = await fetchPublicJson(request, source.catalogUrl, signal, 'application/ld+json, application/json')
+    if (catalog === undefined || !advertisesOfferingFeed(catalog, source)) return []
+  }
+  const feed = await fetchPublicJson(request, source.url, signal, 'application/json')
+  if (feed === undefined) return []
+  const offerings = readPublicOfferingCatalog(feed)
+  if (offerings.some(offering => offering.demo || offering.publisher.id !== source.publisherId || offering.sector !== source.sector)) {
+    throw new TypeError('public_offering_api_scope_mismatch')
+  }
+  return offerings
 }

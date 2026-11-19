@@ -16,6 +16,7 @@ import type {OrganizationWorkflowFlatEntry} from 'sos-data-utils-ts/organization
 import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
 import {normalizeDirectoryFlatClaimsResource,type DirectoryResource,type DirectoryResourceType} from 'sos-data-utils-ts/place-service-directory'
 import {normalizeHealthDcatResource} from 'sos-data-utils-ts/health-dcat'
+import {readTenantPublicOfferingCatalog} from './public-offering-catalog-client.js'
 import {ClaimConsent} from 'fhir-data-utils-ts'
 import {projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
 
@@ -232,6 +233,13 @@ export class WorkforceClient{
  /** Writes one offering without replacing the tenant's imported catalogue. */
  publishIndividualOffering(input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
   return this.publishCatalogueDocument('_upsert',input,pollOptions)
+ }
+
+ /** Reads the offerings currently published by the selected tenant, without forwarding wallet or bearer credentials. */
+ getPublishedOfferings(){
+  const {ctx,providerDid}=this.controller()
+  const {tenantId,jurisdiction,sector}=ctx
+  return readTenantPublicOfferingCatalog({gatewayOrigin:new URL(this.options.baseUrl).origin,tenantId,jurisdiction,sector,publisherId:providerDid},this.options.fetchImpl)
  }
 
  /** Reads the selected controller's internal catalogue and its directory and DCAT projections. */

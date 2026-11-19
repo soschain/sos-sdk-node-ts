@@ -150,7 +150,7 @@ test('reads one registered organization catalogue across the governed directory,
   Service:normalizeDirectoryFlatClaimsResource(buildServiceDirectoryResource({id:safe.resourceUuid,organizationIdentifier:'clinic-department',
    name:'Consultation',placeIdentifiers:['clinic-place'],serviceTypes:['consultation']}))}
  const requests=[]
- const {client}=await fixture(async(path,message)=>{
+ const {client,options}=await fixture(async(path,message)=>{
   const [section,format,type,action]=path.split('/').slice(-4)
   requests.push(`${section}/${format}/${type}/${action}`)
   assert.deepEqual(message.body.data,[{resource:{resourceType:type,id:'search',meta:{claims:{}}}}])
@@ -168,6 +168,20 @@ test('reads one registered organization catalogue across the governed directory,
  const foreign=await fixture(async path=>({iss:providerDid,body:{data:path.includes('/HealthcareService/')
   ?[{response:{status:'200'},resource:{...resources.HealthcareService,resourceType:'Patient'}}]:[]}}))
  await assert.rejects(foreign.client.getOrganizationCatalog({operationId:'catalog-foreign'}),/workforce_catalog_resource_invalid/u)
+ const offering={id:'published-tracker',type:'Product',name:'Tracker',description:'Tracker',sector:ctx.sector,category:'devices',demo:false,
+  publisher:{id:providerDid,name:'Clinic'},offers:[{id:'tracker',seller:{id:providerDid,name:'Clinic'},eligibleRegions:[{country:'ES',regions:[]}],
+   deliveryCountries:[],supportCountries:[],operationCountries:[]}]}
+ let fetched=0
+ const published=new WorkforceClient({...options,fetchImpl:async(url,init)=>{
+  fetched++
+  assert.match(new URL(url).pathname,new RegExp(`^/${ctx.tenantId}/cds-[^/]+/v1/${ctx.sector}/`))
+  assert.equal(init.credentials,'omit')
+  assert.equal(init.redirect,'error')
+  assert.equal(new Headers(init.headers).has('authorization'),false)
+  return Response.json([fetched===1?offering:{...offering,publisher:{id:safe.didWeb,name:'Other publisher'}}])
+ }})
+ assert.deepEqual((await published.getPublishedOfferings()).map(product=>product.id),[offering.id])
+ await assert.rejects(published.getPublishedOfferings(),/public_offering_api_scope_mismatch/u)
 })
 test('projects a real encrypted phone workforce inventory and exact seven-field licence summary without an email placeholder',async()=>{
  need('getAdministration')
