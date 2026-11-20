@@ -66,6 +66,50 @@ for(const [method,action] of [['publishOfferingCatalogue','_publish'],['publishI
  })
 })
 
+test('rejects batches in the single-offering method before contacting the gateway',async()=>{
+ const entry={type:'Product',id:'tracker'}
+ const operationId='individual-offering-'+safe.resourceUuid
+ const path=`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.schema/Catalog/_upsert`
+ let submissions=0
+ await serve(async(req,res,message)=>{
+  if(req.url===path){
+   submissions+=1
+   res.writeHead(202);res.end('{}');return
+  }
+  assert.equal(req.url,`${path}-response`)
+  reply(res,{iss:providerDid,aud:controllerDid,thid:operationId,type:'org.schema.catalog-publication',body:{total:1}})
+ },async baseUrl=>{
+  const client=new WorkforceClient(options(baseUrl))
+  const publish=data=>client.publishIndividualOffering({document:{data},operationId},{intervalMs:0})
+  await assert.rejects(publish([entry,{...entry,id:'second-tracker'}]),/catalog_offering_document_invalid/)
+  await assert.rejects(publish([]),/catalog_offering_document_invalid/)
+  await assert.rejects(publish(null),/catalog_offering_document_invalid/)
+  assert.equal(submissions,0)
+  assert.deepEqual(await publish(entry),{total:1})
+  assert.equal(submissions,1)
+ })
+})
+
+test('submits a reviewed offering batch once and requires a receipt covering every entry',async()=>{
+ const document={jsonapi:{version:'1.1'},data:[{type:'Product',id:'tracker'},{type:'Product',id:'collar'}]}
+ const operationId='catalog-batch-'+safe.resourceUuid
+ const path=`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.schema/Catalog/_upsert`
+ let receiptTotal=2
+ await serve(async(req,res,message)=>{
+  assert.equal(message.thid,operationId)
+  if(req.url===path){assert.deepEqual(message.body,document);res.writeHead(202);res.end('{}');return}
+  assert.equal(req.url,`${path}-response`)
+  reply(res,{iss:providerDid,aud:controllerDid,thid:operationId,type:'org.schema.catalog-publication',body:{total:receiptTotal}})
+ },async baseUrl=>{
+  const client=new WorkforceClient(options(baseUrl))
+  assert.deepEqual(await client.publishOfferingBatch({document,operationId},{intervalMs:0}),{total:2})
+  await assert.rejects(client.publishOfferingBatch({document:{data:[document.data[0],{type:'Service',id:'support'}]},operationId}),/catalog_offering_batch_mixed_types/)
+  receiptTotal=1
+  await assert.rejects(client.publishOfferingBatch({document,operationId},{intervalMs:0}),error=>
+   error.status===502&&error.body.error==='catalog_offering_publication_receipt_invalid')
+ })
+})
+
 for(const {contact,selectedRole} of [{contact:phone,selectedRole:role},{contact:email,selectedRole:role},{contact:email,selectedRole:MultichannelPermissionRoleClaims.Researcher},{contact:phone,selectedRole:`ISCO-08|${Isco08Occupations.Firefighter.code}`}])test(`provisions canonical ${selectedRole} for exact ${contact.contactKind} employee before its separately bound seat`,async()=>{
  const role=selectedRole,messages=[]
  await serve(async(req,res,message)=>{

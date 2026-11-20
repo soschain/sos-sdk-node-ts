@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Reject multi-entry documents before submitting a single-offering update.
+- Preserve products and services that share an ID when updating Demo listings.
+- Publish a reviewed product or service batch through the registered controller
+  client or the Demo vault, with a receipt covering every entry.
+- Replace a Demo organization's imported offering catalogue atomically through
+  the shared vault using the canonical JSON:API submission and host publisher.
 - Register a Personal card through the verified-account client and read the
   gateway's continuation state. Reuse a different Organization ID on retry
   only when its stored contact and subject name match the request.

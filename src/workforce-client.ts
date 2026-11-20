@@ -238,8 +238,22 @@ export class WorkforceClient{
   return this.publishCatalogueDocument('_publish',input,pollOptions)
  }
  /** Writes one offering without replacing the tenant's imported catalogue. */
- publishIndividualOffering(input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
-  return this.publishCatalogueDocument('_upsert',input,pollOptions)
+ async publishIndividualOffering(input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
+  const data=input.document?.data
+  const entry=Array.isArray(data)&&data.length===1?data[0]:data
+  if(!record(entry))throw new TypeError('catalog_offering_document_invalid')
+  return this.publishCatalogueDocument('_upsert',input,pollOptions,1)
+ }
+
+ /** Publishes one reviewed product or service batch without replacing unrelated entries. */
+ async publishOfferingBatch(input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
+  const data=input.document?.data
+  if(!Array.isArray(data)||!data.length)throw new TypeError('catalog_offering_document_invalid')
+  const type=record(data[0])?.type
+  if((type!=='Product'&&type!=='Service')||data.some(entry=>record(entry)?.type!==type)){
+   throw new TypeError('catalog_offering_batch_mixed_types')
+  }
+  return this.publishCatalogueDocument('_upsert',input,pollOptions,data.length)
  }
 
  /** Reads the offerings currently published by the selected tenant, without forwarding wallet or bearer credentials. */
@@ -371,7 +385,7 @@ export class WorkforceClient{
   if(confirmed.resourceType!==resourceType)throw new Error(error)
   return {resourceId:resource.id}
  }
- private async publishCatalogueDocument(action:'_publish'|'_upsert',input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
+ private async publishCatalogueDocument(action:'_publish'|'_upsert',input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions,expectedTotal?:number){
   const identity=this.controller(),{document,operationId}=input
   if(!record(document)||!Object.hasOwn(document,'data')||typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,200}$/u.test(operationId)){
    throw new TypeError('catalog_offering_document_invalid')
@@ -379,7 +393,7 @@ export class WorkforceClient{
   const path=`${this.prefix}/organization/org.schema/Catalog/${action}`
   const result=await this.transport.exchange(path,this.administrationMessage(document,operationId),identity.providerDid,pollOptions)
   const receipt=record(result.poll.body),total=record(receipt?.body)?.total
-  if(receipt?.type!=='org.schema.catalog-publication'||typeof total!=='number'||!Number.isSafeInteger(total)||total<1||(action==='_upsert'&&total!==1)){
+  if(receipt?.type!=='org.schema.catalog-publication'||typeof total!=='number'||!Number.isSafeInteger(total)||total<1||(expectedTotal!==undefined&&total!==expectedTotal)){
    throw new WorkforceSubmitError(502,{error:'catalog_offering_publication_receipt_invalid'})
   }
   return {total}

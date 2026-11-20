@@ -59,7 +59,8 @@ async function fixture(handler){
   if(!path.endsWith('-response')){
    const response=await handler(path,message)
    if(response?.httpStatus)return new Response('{}',{status:response.httpStatus})
-   replies.set(message.thid,{jti:randomUUID(),iss:response.iss,aud:response.aud??controllerDid,thid:response.thid??message.thid,body:response.body})
+   replies.set(message.thid,{jti:randomUUID(),iss:response.iss,aud:response.aud??controllerDid,thid:response.thid??message.thid,
+    ...(response.type?{type:response.type}:{}),body:response.body})
    return new Response('{}',{status:202})
   }
   const packed=await wallet.packForRecipientWithContext(replies.get(message.thid),controllerDid,{context})
@@ -84,6 +85,25 @@ test('registered controller uses fixed research routes and verifies the correlat
  assert.deepEqual(result.poll.body.body,resultBody)
  await assert.rejects(()=>client.submitResearchAdministration({resourceType:'Patient',action:'_search',operationId:'research-study-test',body}),/workforce_research_route_invalid/u)
  assert.equal(messages.length,2)
+})
+
+test('sends one signed catalogue batch and verifies the correlated gateway receipt',async()=>{
+ const document={jsonapi:{version:'1.1'},data:[
+  {type:'Product',id:'tracker',attributes:{name:'Example tracker',category:'devices',description:'Monitoring device',offers:[]}},
+  {type:'Product',id:'collar',attributes:{name:'Example collar',category:'devices',description:'Collar accessory',offers:[]}},
+ ]}
+ const {client,messages}=await fixture(async(path,message)=>{
+  assert.equal(path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.schema/Catalog/_upsert`)
+  assert.deepEqual(message.body,document)
+  return {iss:providerDid,type:'org.schema.catalog-publication',body:{total:2},
+   ...(message.thid==='catalogue-wrong-correlation'?{thid:'other-publication'}:{})}
+ })
+ await assert.rejects(client.publishIndividualOffering({document,operationId:'catalogue-single'}),/catalog_offering_document_invalid/u)
+ assert.equal(messages.length,0)
+ assert.deepEqual(await client.publishOfferingBatch({document,operationId:'catalogue-batch'}),{total:2})
+ assert.equal(messages.filter(({path})=>path.endsWith('/_upsert')).length,1)
+ await assert.rejects(client.publishOfferingBatch({document,operationId:'catalogue-wrong-correlation'}),
+  {message:'workforce_response_binding_invalid'})
 })
 
 test('reads research studies through the registered tenant without a caller-built route or Bundle',async()=>{
