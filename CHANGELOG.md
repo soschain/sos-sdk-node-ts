@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.4 - 2026-11-20
+
+- Pin the published catalogue and Research study contracts used by the
+  reviewed offering and workforce clients.
+
 ## 0.6.3 - 2026-11-20
 
 - Reject multi-entry documents before submitting a single-offering update.
