@@ -1,14 +1,19 @@
 import {randomUUID} from 'node:crypto'
 import {DeviceEnrollmentClient,DeviceEnrollmentSubmitError} from './device-enrollment-client.js'
-import {buildOrganizationEmployeeDidWeb,buildStableActorIdentifier,normalizeActorContact,normalizeUuid,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
+import {buildAuthorityDidWeb,buildOrganizationEmployeeDidWeb,buildStableActorIdentifier,normalizeActorContact,normalizeUuid,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
+import {ActorKinds} from 'antifraud-data-utils-ts/actor-kinds'
 import {SchemaOrgPersonClaim as Person,SchemaOrgIndividualProductClaim as Product,SchemaOrgOfferClaim as Offer,SchemaOrgOrganizationClaim as Organization,SchemaOrgOrderClaim as Order} from 'antifraud-data-utils-ts/schema-org-claims'
 import {getHealthcareRoleByClaim} from 'sos-data-utils-ts/healthcare-roles'
 import {readIsco08Code,findIsco08Occupation} from 'antifraud-data-utils-ts'
 import {GatewayResponseEntryTypes} from 'sos-data-utils-ts/gateway-response-contract'
 import type {AppInfo,PollOptions,RouteContext} from 'sos-data-utils-ts/gateway-transport-contract'
+import type {RegisteredProfileRecord} from 'sos-data-utils-ts/registered-profile-contract'
+import {openRegisteredCommunicationWallet} from './registered-communication-wallet.js'
+import {resolveRegisteredDidWebKeys} from './registered-did-keys.js'
+import {buildHostScopedDidDocumentUrl} from './secure-organization-registration.js'
 import type {EmployeeActivationGrant} from 'sos-data-utils-ts/employee-routing'
 import {employeeActivationGrantMatchesContact} from './employee-activation-grant.js'
-import {RegisteredGatewayTransport,gatewayResponseEntries,type VerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
+import {RegisteredGatewayTransport,createVerifiedGatewaySecureAdapter,gatewayResponseEntries,type VerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
 import type {ServerProfileKeyDescriptor} from './server-profile-custody-keys.js'
 import {IdentityAuthRequestFields} from 'sos-data-utils-ts/identity-auth-wire-contract'
 import type {OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-lifecycle-contract'
@@ -117,6 +122,90 @@ export type WorkforceClientOptions=WorkforceClientBaseOptions&(
  Readonly<{transportProfile:'registered-didcomm-encrypted';clientId:string;tenantIssuer:string;hostRegistry?:WorkforceHostRegistryOptions}>
  |Readonly<{transportProfile:'pre-dcr-didcomm-encrypted';clientId?:never;tenantIssuer?:never}>
 )
+
+type RegisteredWorkforceProfile = Pick<RegisteredProfileRecord,
+ 'ownerId' | 'profileId' | 'actorDid' | 'actorKind' | 'actorMode' | 'providerDid' | 'routeContext'
+ | 'clientId' | 'tenantIssuer' | 'walletKeyDerivationId' | 'publicJwks'>
+
+export type RegisteredWorkforceControllerOptions = Readonly<{
+ gatewayBaseUrl: string
+ appInfo?: AppInfo
+ readUnlockedProfile(binding: Readonly<{ownerId: string; profileId: string}>): Promise<Readonly<{
+  profile: RegisteredWorkforceProfile; unlockedWalletSeed: string
+ }>>
+ hostRegistry?: Pick<WorkforceHostRegistryOptions, 'jurisdiction' | 'hostNetwork'>
+ allowLoopbackHttp?: boolean
+ fetchImpl?: typeof fetch
+}>
+
+/** Opens the same enrolled controller custody for each independent workforce operation. */
+export async function openRegisteredWorkforceController(
+ options: RegisteredWorkforceControllerOptions,
+ session: Readonly<{ownerId: string; profileId: string; verifiedContact: ActorContactInput; bearerToken: string}>,
+): Promise<WorkforceClient> {
+ const denied = () => new Error('workforce_controller_binding_invalid')
+ const { ownerId, profileId, verifiedContact, bearerToken } = session
+ if (!text(ownerId) || !text(profileId) || /[\/\\]/u.test(profileId) || !text(bearerToken)) throw denied()
+ const base = new URL(options.gatewayBaseUrl)
+ const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(base.hostname) && options.allowLoopbackHttp === true
+ if (base.username || base.password || base.pathname !== '/' || base.search || base.hash
+  || (base.protocol !== 'https:' && !(base.protocol === 'http:' && loopback))) throw denied()
+
+ const { profile, unlockedWalletSeed } = await options.readUnlockedProfile({ownerId,profileId})
+ const tenantIssuer = profile.tenantIssuer
+ if (profile.ownerId !== ownerId || profile.profileId !== profileId
+  || profile.actorKind !== ActorKinds.OrganizationController || profile.actorMode !== 'controller'
+  || !text(profile.clientId) || !tenantIssuer || tenantIssuer !== tenantIssuer.trim()) throw denied()
+ const { tenantId, jurisdiction, sector } = profile.routeContext
+ const hostDid = buildAuthorityDidWeb({authority:base.origin})
+ const { providerDid } = profile
+ const prefix = `${hostDid}:${tenantId}:cds-`
+ const [scope, version, routeSector, extra] = providerDid.slice(prefix.length).split(':')
+ if (!/^[-a-zA-Z0-9]+$/u.test(tenantId) || tenantId === 'host' || !/^\p{L}{2}(?:-[A-Za-z0-9]{1,3})?$/u.test(jurisdiction)
+  || !/^[-a-z0-9]+$/u.test(sector) || !providerDid.startsWith(prefix)
+  || scope?.toLowerCase() !== jurisdiction.toLowerCase() || version !== 'v1' || routeSector !== sector || extra !== undefined
+  || (options.appInfo && options.appInfo.sector !== sector)
+  || profile.actorDid !== buildOrganizationEmployeeDidWeb({...verifiedContact,organizationDidWeb:providerDid,role:'RESPRSN'})) throw denied()
+
+ const registry = options.hostRegistry
+ const hostDocumentUrl = registry && buildHostScopedDidDocumentUrl({
+  gatewayBaseUrl:base.origin,hostCoverageScope:registry.jurisdiction,hostNetwork:registry.hostNetwork,version:'v1',
+ })
+ const resolved = new Map<string,ReturnType<typeof resolveRegisteredDidWebKeys>>()
+ function keys(did: string) {
+  if (did !== providerDid && !(did === hostDid && hostDocumentUrl)) throw denied()
+  let value = resolved.get(did)
+  if (!value) {
+   value = resolveRegisteredDidWebKeys(did, {
+    allowLoopbackHttp:base.protocol === 'http:', fetchImpl:options.fetchImpl,
+    ...(did === hostDid ? { didDocumentUrl:hostDocumentUrl } : {}),
+   })
+   resolved.set(did,value)
+  }
+  return value
+ }
+ const { wallet, context } = await openRegisteredCommunicationWallet({
+  walletKeyDerivationId:profile.walletKeyDerivationId ?? profileId, unlockedWalletSeed, registeredPublicJwks:profile.publicJwks,
+  resolveRecipientJwk:async did => ({...(await keys(did)).keyAgreementJwk}),
+ })
+ const adapter = (did: string) => createVerifiedGatewaySecureAdapter({
+  gatewayDid:did,
+  pack:message => wallet.packForRecipientWithContext(message,did,{context}),
+  decrypt:packed => wallet.unpackWithContext(packed,{context}),
+  resolveGatewaySigningJwk:async target => {
+   if (target !== did) throw denied()
+   return (await keys(did)).signingJwk
+  },
+  errorPrefix:'workforce_controller',
+ })
+ return new WorkforceClient({
+  baseUrl:base.origin,ctx:profile.routeContext,providerDid,gatewayDid:providerDid,dcrResponseIssuer:hostDid,
+  issuerDid:profile.actorDid,bearerToken,clientId:profile.clientId,tenantIssuer,
+  secureTransportAdapter:adapter(providerDid),transportProfile:'registered-didcomm-encrypted',
+  appInfo:options.appInfo,fetchImpl:options.fetchImpl,
+  ...(registry ? { hostRegistry:{...registry,hostDid,responseIssuer:hostDid,secureTransportAdapter:adapter(hostDid)} } : {}),
+ })
+}
 
 /**
  * Independent staff/licence and recipient device transport. The BFF supplies
