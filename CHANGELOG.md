@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.3 - 2026-11-20
 
 - Reject multi-entry documents before submitting a single-offering update.
 - Preserve products and services that share an ID when updating Demo listings.
