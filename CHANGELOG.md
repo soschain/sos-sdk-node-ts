@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Open workforce transport from an existing unlocked organization controller
+  profile and verified account contact. Bind the profile to the configured
+  host, tenant, registered device and wallet keys before resolving a DID.
+
+- Add independent registered controller employee, licence and group reads.
+  Employee searches support exact email and occupation filters.
+
 ## 0.6.4 - 2026-11-20
 
 - Pin the published catalogue and Research study contracts used by the

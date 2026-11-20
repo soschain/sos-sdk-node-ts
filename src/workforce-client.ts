@@ -1,14 +1,19 @@
 import {randomUUID} from 'node:crypto'
 import {DeviceEnrollmentClient,DeviceEnrollmentSubmitError} from './device-enrollment-client.js'
-import {buildOrganizationEmployeeDidWeb,buildStableActorIdentifier,normalizeActorContact,normalizeUuid,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
+import {buildAuthorityDidWeb,buildOrganizationEmployeeDidWeb,buildStableActorIdentifier,normalizeActorContact,normalizeUuid,type ActorContactInput} from 'antifraud-data-utils-ts/organization-identity'
+import {ActorKinds} from 'antifraud-data-utils-ts/actor-kinds'
 import {SchemaOrgPersonClaim as Person,SchemaOrgIndividualProductClaim as Product,SchemaOrgOfferClaim as Offer,SchemaOrgOrganizationClaim as Organization,SchemaOrgOrderClaim as Order} from 'antifraud-data-utils-ts/schema-org-claims'
 import {getHealthcareRoleByClaim} from 'sos-data-utils-ts/healthcare-roles'
 import {readIsco08Code,findIsco08Occupation} from 'antifraud-data-utils-ts'
 import {GatewayResponseEntryTypes} from 'sos-data-utils-ts/gateway-response-contract'
 import type {AppInfo,PollOptions,RouteContext} from 'sos-data-utils-ts/gateway-transport-contract'
+import type {RegisteredProfileRecord} from 'sos-data-utils-ts/registered-profile-contract'
+import {openRegisteredCommunicationWallet} from './registered-communication-wallet.js'
+import {resolveRegisteredDidWebKeys} from './registered-did-keys.js'
+import {buildHostScopedDidDocumentUrl} from './secure-organization-registration.js'
 import type {EmployeeActivationGrant} from 'sos-data-utils-ts/employee-routing'
 import {employeeActivationGrantMatchesContact} from './employee-activation-grant.js'
-import {RegisteredGatewayTransport,gatewayResponseEntries,type VerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
+import {RegisteredGatewayTransport,createVerifiedGatewaySecureAdapter,gatewayResponseEntries,type VerifiedGatewaySecureAdapter} from './registered-gateway-transport.js'
 import type {ServerProfileKeyDescriptor} from './server-profile-custody-keys.js'
 import {IdentityAuthRequestFields} from 'sos-data-utils-ts/identity-auth-wire-contract'
 import type {OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-lifecycle-contract'
@@ -20,6 +25,7 @@ import {buildResearchStudyDatasetPublication,ClaimsHealthDcatCatalogRecord,Claim
 import {normalizeProvenanceR5FlatClaimsResource} from 'sos-data-utils-ts/provenance'
 import {readTenantPublicOfferingCatalog} from './public-offering-catalog-client.js'
 import {ClaimConsent} from 'fhir-data-utils-ts'
+import {GroupFlatClaimCatalog} from 'fhir-data-utils-ts/group-r5'
 import {projectResearchAssignmentRoster,projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
 
 type Row=Record<string,unknown>
@@ -106,10 +112,100 @@ export type WorkforceHostRegistryOptions=Readonly<{
  hostDid:string;jurisdiction:string;hostNetwork:'test'|'local-network'|'test-network'|'network'
  responseIssuer:string;secureTransportAdapter:VerifiedGatewaySecureAdapter
 }>
+export type EmployeeDirectoryFilters = Readonly<{ email?: string; occupation?: string }>
+export type OrganizationGroupSearchClaims = Readonly<Partial<Record<
+ (typeof GroupFlatClaimCatalog.standardSearch)[number], readonly string[]
+>>>
+const groupSearchClaims = new Set<string>(GroupFlatClaimCatalog.standardSearch)
+
 export type WorkforceClientOptions=WorkforceClientBaseOptions&(
  Readonly<{transportProfile:'registered-didcomm-encrypted';clientId:string;tenantIssuer:string;hostRegistry?:WorkforceHostRegistryOptions}>
  |Readonly<{transportProfile:'pre-dcr-didcomm-encrypted';clientId?:never;tenantIssuer?:never}>
 )
+
+type RegisteredWorkforceProfile = Pick<RegisteredProfileRecord,
+ 'ownerId' | 'profileId' | 'actorDid' | 'actorKind' | 'actorMode' | 'providerDid' | 'routeContext'
+ | 'clientId' | 'tenantIssuer' | 'walletKeyDerivationId' | 'publicJwks'>
+
+export type RegisteredWorkforceControllerOptions = Readonly<{
+ gatewayBaseUrl: string
+ appInfo?: AppInfo
+ readUnlockedProfile(binding: Readonly<{ownerId: string; profileId: string}>): Promise<Readonly<{
+  profile: RegisteredWorkforceProfile; unlockedWalletSeed: string
+ }>>
+ hostRegistry?: Pick<WorkforceHostRegistryOptions, 'jurisdiction' | 'hostNetwork'>
+ allowLoopbackHttp?: boolean
+ fetchImpl?: typeof fetch
+}>
+
+/** Opens the same enrolled controller custody for each independent workforce operation. */
+export async function openRegisteredWorkforceController(
+ options: RegisteredWorkforceControllerOptions,
+ session: Readonly<{ownerId: string; profileId: string; verifiedContact: ActorContactInput; bearerToken: string}>,
+): Promise<WorkforceClient> {
+ const denied = () => new Error('workforce_controller_binding_invalid')
+ const { ownerId, profileId, verifiedContact, bearerToken } = session
+ if (!text(ownerId) || !text(profileId) || /[\/\\]/u.test(profileId) || !text(bearerToken)) throw denied()
+ const base = new URL(options.gatewayBaseUrl)
+ const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(base.hostname) && options.allowLoopbackHttp === true
+ if (base.username || base.password || base.pathname !== '/' || base.search || base.hash
+  || (base.protocol !== 'https:' && !(base.protocol === 'http:' && loopback))) throw denied()
+
+ const { profile, unlockedWalletSeed } = await options.readUnlockedProfile({ownerId,profileId})
+ const tenantIssuer = profile.tenantIssuer
+ if (profile.ownerId !== ownerId || profile.profileId !== profileId
+  || profile.actorKind !== ActorKinds.OrganizationController || profile.actorMode !== 'controller'
+  || !text(profile.clientId) || !tenantIssuer || tenantIssuer !== tenantIssuer.trim()) throw denied()
+ const { tenantId, jurisdiction, sector } = profile.routeContext
+ const hostDid = buildAuthorityDidWeb({authority:base.origin})
+ const { providerDid } = profile
+ const prefix = `${hostDid}:${tenantId}:cds-`
+ const [scope, version, routeSector, extra] = providerDid.slice(prefix.length).split(':')
+ if (!/^[-a-zA-Z0-9]+$/u.test(tenantId) || tenantId === 'host' || !/^\p{L}{2}(?:-[A-Za-z0-9]{1,3})?$/u.test(jurisdiction)
+  || !/^[-a-z0-9]+$/u.test(sector) || !providerDid.startsWith(prefix)
+  || scope?.toLowerCase() !== jurisdiction.toLowerCase() || version !== 'v1' || routeSector !== sector || extra !== undefined
+  || (options.appInfo && options.appInfo.sector !== sector)
+  || profile.actorDid !== buildOrganizationEmployeeDidWeb({...verifiedContact,organizationDidWeb:providerDid,role:'RESPRSN'})) throw denied()
+
+ const registry = options.hostRegistry
+ const hostDocumentUrl = registry && buildHostScopedDidDocumentUrl({
+  gatewayBaseUrl:base.origin,hostCoverageScope:registry.jurisdiction,hostNetwork:registry.hostNetwork,version:'v1',
+ })
+ const resolved = new Map<string,ReturnType<typeof resolveRegisteredDidWebKeys>>()
+ function keys(did: string) {
+  if (did !== providerDid && !(did === hostDid && hostDocumentUrl)) throw denied()
+  let value = resolved.get(did)
+  if (!value) {
+   value = resolveRegisteredDidWebKeys(did, {
+    allowLoopbackHttp:base.protocol === 'http:', fetchImpl:options.fetchImpl,
+    ...(did === hostDid ? { didDocumentUrl:hostDocumentUrl } : {}),
+   })
+   resolved.set(did,value)
+  }
+  return value
+ }
+ const { wallet, context } = await openRegisteredCommunicationWallet({
+  walletKeyDerivationId:profile.walletKeyDerivationId ?? profileId, unlockedWalletSeed, registeredPublicJwks:profile.publicJwks,
+  resolveRecipientJwk:async did => ({...(await keys(did)).keyAgreementJwk}),
+ })
+ const adapter = (did: string) => createVerifiedGatewaySecureAdapter({
+  gatewayDid:did,
+  pack:message => wallet.packForRecipientWithContext(message,did,{context}),
+  decrypt:packed => wallet.unpackWithContext(packed,{context}),
+  resolveGatewaySigningJwk:async target => {
+   if (target !== did) throw denied()
+   return (await keys(did)).signingJwk
+  },
+  errorPrefix:'workforce_controller',
+ })
+ return new WorkforceClient({
+  baseUrl:base.origin,ctx:profile.routeContext,providerDid,gatewayDid:providerDid,dcrResponseIssuer:hostDid,
+  issuerDid:profile.actorDid,bearerToken,clientId:profile.clientId,tenantIssuer,
+  secureTransportAdapter:adapter(providerDid),transportProfile:'registered-didcomm-encrypted',
+  appInfo:options.appInfo,fetchImpl:options.fetchImpl,
+  ...(registry ? { hostRegistry:{...registry,hostDid,responseIssuer:hostDid,secureTransportAdapter:adapter(hostDid)} } : {}),
+ })
+}
 
 /**
  * Independent staff/licence and recipient device transport. The BFF supplies
@@ -194,10 +290,33 @@ export class WorkforceClient{
   return this.searchResearchResource('ResearchStudy',input.operationId,input.claims,pollOptions)
  }
 
+ /** Runs the existing tenant-scoped Group search independently of workforce reads. */
+ searchOrganizationGroups(
+  input: Readonly<{ operationId: string; claims?: OrganizationGroupSearchClaims }>,
+  pollOptions?: PollOptions,
+ ){
+  const filters = input.claims === undefined ? {} : record(input.claims)
+  if (!filters) throw new TypeError('workforce_group_search_filter_invalid')
+
+  const claims: Record<string, readonly string[]> = {}
+  for (const [name, values] of Object.entries(filters)) {
+   if (
+    !groupSearchClaims.has(name)
+    || !Array.isArray(values)
+    || !values.length
+    || values.some(value => typeof value !== 'string' || !value.trim())
+   ) {
+    throw new TypeError('workforce_group_search_filter_invalid')
+   }
+   claims[name] = values
+  }
+  return this.searchResearchResource('Group', input.operationId, claims, pollOptions)
+ }
+
  /** Finds the Group defined by the persisted study-to-team identifier. */
  searchResearchReviewTeam(input:Readonly<{studyId:string;operationId:string}>,pollOptions?:PollOptions){
   const {identifier}=buildResearchStudyReviewTeamGroupSearch(input.studyId)
-  return this.searchResearchResource('Group',input.operationId,{'Group.identifier':[identifier]},pollOptions)
+  return this.searchOrganizationGroups({operationId:input.operationId,claims:{'Group.identifier':[identifier]}},pollOptions)
  }
 
  /** Lists study-bound Consent records, optionally restricted to one PractitionerRole. */
@@ -399,24 +518,63 @@ export class WorkforceClient{
   return {total}
  }
  /** Reads the signed roster without querying or requiring a licence. */
- async getEmployeeDirectory(pollOptions?:PollOptions){
-  const identity=this.controller()
-  return this.transport.exchange(this.prefix+'/entity/org.schema/Employee/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
-   request:{method:'POST',url:'Employee/_search'},resource:{resourceType:'Parameters',parameter:[]},
-  }]},'workforce-employees-'+randomUUID()),identity.tenantIssuer,pollOptions)
+ getEmployeeDirectory(pollOptions?:PollOptions){
+  return this.searchEmployees({},pollOptions)
+ }
+
+ /** Runs a tenant employee search with optional exact email and occupation filters. */
+ async searchEmployees(filters: EmployeeDirectoryFilters = {}, pollOptions?: PollOptions) {
+  const identity = this.controller()
+  if (!record(filters) || Object.keys(filters).some(name => name !== 'email' && name !== 'occupation')) {
+   throw new TypeError('workforce_employee_search_filter_invalid')
+  }
+
+  const parameter: { name: string; valueString: string }[] = []
+  if (Object.hasOwn(filters, 'email')) {
+   const contact = requireText(filters.email, 'workforce_employee_search_filter_invalid')
+   const email = normalizeActorContact({ contactKind: 'email', contact })
+   if (email.includes(',')) throw new TypeError('workforce_employee_search_filter_invalid')
+   parameter.push({ name: Person.Email, valueString: email })
+  }
+  if (Object.hasOwn(filters, 'occupation')) {
+   const occupation = requireText(filters.occupation, 'workforce_employee_search_filter_invalid')
+   if (occupation.includes(',')) throw new TypeError('workforce_employee_search_filter_invalid')
+   parameter.push({ name: Person.OccupationIdentifierValue, valueString: occupation })
+  }
+
+  const body = {
+   resourceType: 'Bundle',
+   type: 'batch',
+   entry: [{
+    request: { method: 'POST', url: 'Employee/_search' },
+    resource: { resourceType: 'Parameters', parameter },
+   }],
+  }
+  return this.transport.exchange(
+   this.prefix + '/entity/org.schema/Employee/_search',
+   this.administrationMessage(body, 'workforce-employees-' + randomUUID()),
+   identity.tenantIssuer,
+   pollOptions,
+  )
  }
  /** Lists active and invited employees available for descriptive study assignment. */
  async getResearchAssignmentRoster(pollOptions?: PollOptions) {
   const result = await this.getEmployeeDirectory(pollOptions)
   return projectResearchAssignmentRoster(result.poll.body)
  }
+ /** Reads seats and their device bindings without querying employees. */
+ async getLicenseDirectory(pollOptions?:PollOptions){
+  const identity=this.controller()
+  return this.transport.exchange(this.prefix+'/entity/org.schema/License/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
+   type:'License-search-request-v1.0',request:{method:'POST'},meta:{},resource:{meta:{claims:{'@context':'org.schema','@type':'IndividualProduct:Search'}}},
+  }]},'workforce-licenses-'+randomUUID()),identity.providerDid,pollOptions)
+ }
+
  /** Authenticated directory envelopes become typed contacts and exact seat/device projections. */
  async getAdministration(pollOptions?:PollOptions){
   const identity=this.controller()
   const employees=await this.getEmployeeDirectory(pollOptions)
-  const licenses=await this.transport.exchange(this.prefix+'/entity/org.schema/License/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
-   type:'License-search-request-v1.0',request:{method:'POST'},meta:{},resource:{meta:{claims:{'@context':'org.schema','@type':'IndividualProduct:Search'}}},
-  }]},'workforce-licenses-'+randomUUID()),identity.providerDid,pollOptions)
+  const licenses=await this.getLicenseDirectory(pollOptions)
   return {...projectWorkforceAdministration(employees.poll.body,licenses.poll.body,identity.providerDid),evidence:{employees,licenses}}
  }
  async changeEmployee(input:Readonly<{action:'disable'|'reactivate'|'purge';resourceId:string;employeeClaims:Readonly<Row>}>,pollOptions?:PollOptions){

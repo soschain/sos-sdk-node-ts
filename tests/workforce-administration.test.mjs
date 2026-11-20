@@ -258,6 +258,52 @@ test('publishes a study dataset with Provenance and archives only its persisted 
   'org.w3.dcat/Dataset/_batch','org.w3.dcat/CatalogRecord/_batch','org.w3.dcat/CatalogRecord/_search','org.w3.dcat/CatalogRecord/_batch'])
 })
 
+test('searches employees by email and occupation without reading licences or groups',async()=>{
+ need('searchEmployees')
+ const f=await fixture(async(path,message)=>{
+  assert.equal(path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/entity/org.schema/Employee/_search`)
+  assert.deepEqual(message.body.entry[0].resource.parameter,[
+   {name:Person.Email,valueString:safe.firstContactEmail},
+   {name:Person.OccupationIdentifierValue,valueString:role},
+  ])
+  return {iss:tenantIssuer,body:{data:[employeeRow()]}}
+ })
+ await f.client.searchEmployees({email:safe.firstContactEmail,occupation:role},{intervalMs:0})
+ assert.equal(f.messages.length,2)
+ assert.equal(f.messages[1].path,f.messages[0].path+'-response')
+ await assert.rejects(f.client.searchEmployees({email:''}),TypeError)
+ await assert.rejects(f.client.searchEmployees({occupation:','}),TypeError)
+ await assert.rejects(f.client.searchEmployees({tenantId:safe.tenantId}),TypeError)
+ assert.equal(f.messages.length,2)
+})
+
+test('reads licences separately from employees using the registered tenant',async()=>{
+ need('getLicenseDirectory')
+ const f=await fixture(async path=>{
+  assert.equal(path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/entity/org.schema/License/_search`)
+  return {iss:providerDid,body:{data:[licenseRow()]}}
+ })
+ await f.client.getLicenseDirectory({intervalMs:0})
+ assert.equal(f.messages.length,2)
+ assert.equal(f.messages[1].path,f.messages[0].path+'-response')
+})
+
+test('searches tenant groups separately and rejects claims outside the canonical group contract',async()=>{
+ need('searchOrganizationGroups')
+ const claims={'Group.identifier':[safe.resourceUuid]}
+ const f=await fixture(async(path,message)=>{
+  assert.equal(path,`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.hl7.fhir.r5/Group/_search`)
+  assert.deepEqual(message.body.data[0].resource.meta.claims,claims)
+  return {iss:providerDid,body:{resourceType:'Bundle',type:'searchset',data:[]}}
+ })
+ await f.client.searchOrganizationGroups({operationId:safe.resourceUuid,claims},{intervalMs:0})
+ assert.equal(f.messages.length,2)
+ assert.equal(f.messages[1].path,f.messages[0].path+'-response')
+ await assert.rejects(async()=>f.client.searchOrganizationGroups({operationId:safe.resourceUuid,claims:{'Group.unknown':[safe.resourceUuid]}}),TypeError)
+ await assert.rejects(async()=>f.client.searchOrganizationGroups({operationId:safe.resourceUuid,claims:null}),TypeError)
+ assert.equal(f.messages.length,2)
+})
+
 test('projects a real encrypted phone workforce inventory and exact seven-field licence summary without an email placeholder',async()=>{
  need('getAdministration')
  const f=await fixture(async path=>path.includes('/Employee/')?{iss:tenantIssuer,body:{data:[employeeRow()]}}:{iss:providerDid,body:{data:[licenseRow()]}})
@@ -361,6 +407,9 @@ test('pre-DCR possession cannot list or mutate workforce, purchase seats or admi
  const client=new WorkforceClient(options)
  for(const run of [
   ()=>client.getAdministration(),
+  ()=>client.searchEmployees({email:safe.firstContactEmail}),
+  ()=>client.getLicenseDirectory(),
+  ()=>client.searchOrganizationGroups({operationId:safe.resourceUuid}),
   ()=>client.changeEmployee({action:'disable',resourceId:safe.resourceUuid,employeeClaims:{}}),
   ()=>client.revokeDevice({licenseId:'synthetic-employee-seat',clientId:'synthetic-employee-client'}),
   ()=>client.requestEmployeeLicenseOffer({quantity:1}),
