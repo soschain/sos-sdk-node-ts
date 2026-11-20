@@ -375,6 +375,15 @@ persisted registration ID to the profile callback. Registration and profile
 creation commit together; a failed callback consumes neither. These browser
 registrations are not GW DCR receipts or physical-device attestations.
 `requireActiveInstallation` rechecks the exact stored browser/role binding.
+A registered controller can load the organization status through
+`organizationLifecycle({ action: 'status' })`. Use
+`searchEmployees({ email, occupation })` for the employee directory,
+`getLicenseDirectory()` for seats and device bindings, and
+`searchOrganizationGroups({ operationId, claims })` for tenant groups on
+gateways that advertise the Group contract. An empty employee filter
+lists the registered tenant's employees. Each method completes its own
+signed asynchronous request and matching poll.
+
 Controller-authorized `revokeDevice` targets its actual registration ID;
 disabling an employee revokes that role's registrations without changing other
 roles. Reactivation restores only the suspended role binding and requires a

@@ -20,6 +20,7 @@ import {buildResearchStudyDatasetPublication,ClaimsHealthDcatCatalogRecord,Claim
 import {normalizeProvenanceR5FlatClaimsResource} from 'sos-data-utils-ts/provenance'
 import {readTenantPublicOfferingCatalog} from './public-offering-catalog-client.js'
 import {ClaimConsent} from 'fhir-data-utils-ts'
+import {GroupFlatClaimCatalog} from 'fhir-data-utils-ts/group-r5'
 import {projectResearchAssignmentRoster,projectWorkforceAdministration,readOrganizationLifecycleSnapshot,readOrganizationPurgeReceipt,requireOrganizationTransition} from './workforce-administration.js'
 
 type Row=Record<string,unknown>
@@ -106,6 +107,12 @@ export type WorkforceHostRegistryOptions=Readonly<{
  hostDid:string;jurisdiction:string;hostNetwork:'test'|'local-network'|'test-network'|'network'
  responseIssuer:string;secureTransportAdapter:VerifiedGatewaySecureAdapter
 }>
+export type EmployeeDirectoryFilters = Readonly<{ email?: string; occupation?: string }>
+export type OrganizationGroupSearchClaims = Readonly<Partial<Record<
+ (typeof GroupFlatClaimCatalog.standardSearch)[number], readonly string[]
+>>>
+const groupSearchClaims = new Set<string>(GroupFlatClaimCatalog.standardSearch)
+
 export type WorkforceClientOptions=WorkforceClientBaseOptions&(
  Readonly<{transportProfile:'registered-didcomm-encrypted';clientId:string;tenantIssuer:string;hostRegistry?:WorkforceHostRegistryOptions}>
  |Readonly<{transportProfile:'pre-dcr-didcomm-encrypted';clientId?:never;tenantIssuer?:never}>
@@ -194,10 +201,33 @@ export class WorkforceClient{
   return this.searchResearchResource('ResearchStudy',input.operationId,input.claims,pollOptions)
  }
 
+ /** Runs the existing tenant-scoped Group search independently of workforce reads. */
+ searchOrganizationGroups(
+  input: Readonly<{ operationId: string; claims?: OrganizationGroupSearchClaims }>,
+  pollOptions?: PollOptions,
+ ){
+  const filters = input.claims === undefined ? {} : record(input.claims)
+  if (!filters) throw new TypeError('workforce_group_search_filter_invalid')
+
+  const claims: Record<string, readonly string[]> = {}
+  for (const [name, values] of Object.entries(filters)) {
+   if (
+    !groupSearchClaims.has(name)
+    || !Array.isArray(values)
+    || !values.length
+    || values.some(value => typeof value !== 'string' || !value.trim())
+   ) {
+    throw new TypeError('workforce_group_search_filter_invalid')
+   }
+   claims[name] = values
+  }
+  return this.searchResearchResource('Group', input.operationId, claims, pollOptions)
+ }
+
  /** Finds the Group defined by the persisted study-to-team identifier. */
  searchResearchReviewTeam(input:Readonly<{studyId:string;operationId:string}>,pollOptions?:PollOptions){
   const {identifier}=buildResearchStudyReviewTeamGroupSearch(input.studyId)
-  return this.searchResearchResource('Group',input.operationId,{'Group.identifier':[identifier]},pollOptions)
+  return this.searchOrganizationGroups({operationId:input.operationId,claims:{'Group.identifier':[identifier]}},pollOptions)
  }
 
  /** Lists study-bound Consent records, optionally restricted to one PractitionerRole. */
@@ -399,24 +429,63 @@ export class WorkforceClient{
   return {total}
  }
  /** Reads the signed roster without querying or requiring a licence. */
- async getEmployeeDirectory(pollOptions?:PollOptions){
-  const identity=this.controller()
-  return this.transport.exchange(this.prefix+'/entity/org.schema/Employee/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
-   request:{method:'POST',url:'Employee/_search'},resource:{resourceType:'Parameters',parameter:[]},
-  }]},'workforce-employees-'+randomUUID()),identity.tenantIssuer,pollOptions)
+ getEmployeeDirectory(pollOptions?:PollOptions){
+  return this.searchEmployees({},pollOptions)
+ }
+
+ /** Runs a tenant employee search with optional exact email and occupation filters. */
+ async searchEmployees(filters: EmployeeDirectoryFilters = {}, pollOptions?: PollOptions) {
+  const identity = this.controller()
+  if (!record(filters) || Object.keys(filters).some(name => name !== 'email' && name !== 'occupation')) {
+   throw new TypeError('workforce_employee_search_filter_invalid')
+  }
+
+  const parameter: { name: string; valueString: string }[] = []
+  if (Object.hasOwn(filters, 'email')) {
+   const contact = requireText(filters.email, 'workforce_employee_search_filter_invalid')
+   const email = normalizeActorContact({ contactKind: 'email', contact })
+   if (email.includes(',')) throw new TypeError('workforce_employee_search_filter_invalid')
+   parameter.push({ name: Person.Email, valueString: email })
+  }
+  if (Object.hasOwn(filters, 'occupation')) {
+   const occupation = requireText(filters.occupation, 'workforce_employee_search_filter_invalid')
+   if (occupation.includes(',')) throw new TypeError('workforce_employee_search_filter_invalid')
+   parameter.push({ name: Person.OccupationIdentifierValue, valueString: occupation })
+  }
+
+  const body = {
+   resourceType: 'Bundle',
+   type: 'batch',
+   entry: [{
+    request: { method: 'POST', url: 'Employee/_search' },
+    resource: { resourceType: 'Parameters', parameter },
+   }],
+  }
+  return this.transport.exchange(
+   this.prefix + '/entity/org.schema/Employee/_search',
+   this.administrationMessage(body, 'workforce-employees-' + randomUUID()),
+   identity.tenantIssuer,
+   pollOptions,
+  )
  }
  /** Lists active and invited employees available for descriptive study assignment. */
  async getResearchAssignmentRoster(pollOptions?: PollOptions) {
   const result = await this.getEmployeeDirectory(pollOptions)
   return projectResearchAssignmentRoster(result.poll.body)
  }
+ /** Reads seats and their device bindings without querying employees. */
+ async getLicenseDirectory(pollOptions?:PollOptions){
+  const identity=this.controller()
+  return this.transport.exchange(this.prefix+'/entity/org.schema/License/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
+   type:'License-search-request-v1.0',request:{method:'POST'},meta:{},resource:{meta:{claims:{'@context':'org.schema','@type':'IndividualProduct:Search'}}},
+  }]},'workforce-licenses-'+randomUUID()),identity.providerDid,pollOptions)
+ }
+
  /** Authenticated directory envelopes become typed contacts and exact seat/device projections. */
  async getAdministration(pollOptions?:PollOptions){
   const identity=this.controller()
   const employees=await this.getEmployeeDirectory(pollOptions)
-  const licenses=await this.transport.exchange(this.prefix+'/entity/org.schema/License/_search',this.administrationMessage({resourceType:'Bundle',type:'batch',entry:[{
-   type:'License-search-request-v1.0',request:{method:'POST'},meta:{},resource:{meta:{claims:{'@context':'org.schema','@type':'IndividualProduct:Search'}}},
-  }]},'workforce-licenses-'+randomUUID()),identity.providerDid,pollOptions)
+  const licenses=await this.getLicenseDirectory(pollOptions)
   return {...projectWorkforceAdministration(employees.poll.body,licenses.poll.body,identity.providerDid),evidence:{employees,licenses}}
  }
  async changeEmployee(input:Readonly<{action:'disable'|'reactivate'|'purge';resourceId:string;employeeClaims:Readonly<Row>}>,pollOptions?:PollOptions){

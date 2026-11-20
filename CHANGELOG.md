@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add independent registered controller employee, licence and group reads.
+  Employee searches support exact email and occupation filters.
+
 ## 0.6.4 - 2026-11-20
 
 - Pin the published catalogue and Research study contracts used by the
