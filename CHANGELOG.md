@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Withdraw one offering and retrieve its retained versions from an open,
+  registered controller session.
+
 - Reuse Core catalogue publication plans and receipt validation in the registered
   controller client. Document secure catalogue publication and public readback.
 

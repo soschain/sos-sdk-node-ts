@@ -21,8 +21,9 @@ import type {OrganizationWorkflowFlatEntry} from 'sos-data-utils-ts/organization
 import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
 import {normalizeDirectoryFlatClaimsResource,type DirectoryResource,type DirectoryResourceType} from 'sos-data-utils-ts/place-service-directory'
 import {ClaimsHealthDcatCatalogRecord,normalizeHealthDcatResource,updateHealthDcatCatalogRecordStatus} from 'sos-data-utils-ts/health-dcat'
-import {planResearchStudyDatasetPublication,planReviewedOfferingBatch,readOfferingPublicationReceipt,
- type ResearchStudyDatasetPublicationInput} from 'sos-sdk-core-ts/catalogue-publication'
+import {planOfferingReference,planResearchStudyDatasetPublication,planReviewedOfferingBatch,
+ readOfferingHistoryReceipt,readOfferingPublicationReceipt,
+ type OfferingReferenceInput,type ResearchStudyDatasetPublicationInput} from 'sos-sdk-core-ts/catalogue-publication'
 import {readTenantPublicOfferingCatalog} from './public-offering-catalog-client.js'
 import {ClaimConsent} from 'fhir-data-utils-ts'
 import {GroupFlatClaimCatalog} from 'fhir-data-utils-ts/group-r5'
@@ -370,6 +371,19 @@ export class WorkforceClient{
   return this.publishCatalogueDocument('_upsert',plan,pollOptions,plan.expectedTotal)
  }
 
+ /** Withdraws one published listing while preserving its versions. */
+ async unpublishOffering(input:OfferingReferenceInput,pollOptions?:PollOptions){
+  return this.publishCatalogueDocument('_unpublish',planOfferingReference(input),pollOptions,1)
+ }
+
+ /** Reads the authenticated history of the specified product or service. */
+ async getOfferingHistory(input:OfferingReferenceInput,pollOptions?:PollOptions){
+  const receipt=await this.exchangeCatalogueDocument('_history',planOfferingReference(input),pollOptions)
+  const history=readOfferingHistoryReceipt(receipt,input)
+  if(!history)throw new WorkforceSubmitError(502,{error:'catalog_offering_history_receipt_invalid'})
+  return history
+ }
+
  /** Reads the offerings currently published by the selected tenant, without forwarding wallet or bearer credentials. */
  getPublishedOfferings(){
   const {ctx,providerDid}=this.controller()
@@ -475,14 +489,18 @@ export class WorkforceClient{
   if(confirmed.resourceType!==resourceType)throw new Error(error)
   return {resourceId:resource.id}
  }
- private async publishCatalogueDocument(action:'_publish'|'_upsert',input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions,expectedTotal?:number){
+ private async exchangeCatalogueDocument(action:'_publish'|'_upsert'|'_unpublish'|'_history',input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
   const identity=this.controller(),{document,operationId}=input
   if(!record(document)||!Object.hasOwn(document,'data')||typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,200}$/u.test(operationId)){
    throw new TypeError('catalog_offering_document_invalid')
   }
   const path=`${this.prefix}/organization/org.schema/Catalog/${action}`
   const result=await this.transport.exchange(path,this.administrationMessage(document,operationId),identity.providerDid,pollOptions)
-  const confirmation=readOfferingPublicationReceipt(result.poll.body,expectedTotal)
+  return result.poll.body
+ }
+ private async publishCatalogueDocument(action:'_publish'|'_upsert'|'_unpublish',input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions,expectedTotal?:number){
+  const receipt=await this.exchangeCatalogueDocument(action,input,pollOptions)
+  const confirmation=readOfferingPublicationReceipt(receipt,expectedTotal)
   if(!confirmation)throw new WorkforceSubmitError(502,{error:'catalog_offering_publication_receipt_invalid'})
   return confirmation
  }
