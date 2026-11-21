@@ -37,6 +37,8 @@ Configured gateway communication-key resolution is documented in
 [`docs/REGISTERED_DID_KEYS.md`](docs/REGISTERED_DID_KEYS.md).
 Public agreement-key resolution, including its explicit local-test transport,
 is documented in [`docs/DID_WEB_KEY_AGREEMENT.md`](docs/DID_WEB_KEY_AGREEMENT.md).
+Secure controller catalogue publication is documented in
+[`docs/CATALOGUE_PUBLICATION.md`](docs/CATALOGUE_PUBLICATION.md).
 Staff provisioning and recipient installation contracts are documented in
 [`docs/WORKFORCE_CLIENT.md`](docs/WORKFORCE_CLIENT.md).
 The shared pre-DCR transport below controller/employee admission is described in

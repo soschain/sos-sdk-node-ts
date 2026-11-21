@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reuse Core catalogue publication plans and receipt validation in the registered
+  controller client. Document secure catalogue publication and public readback.
+
 - Open workforce transport from an existing unlocked organization controller
   profile and verified account contact. Bind the profile to the configured
   host, tenant, registered device and wallet keys before resolving a DID.

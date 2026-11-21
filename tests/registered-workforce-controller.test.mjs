@@ -1,6 +1,7 @@
 // Flow contract: only the owner of an unlocked registered organization controller can open workforce transport for its configured host and tenant. The stored public keys must match the recovered wallet, and rejected bindings do not resolve remote keys.
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
+import {readPublicOfferingDraftDocument} from 'antifraud-data-utils-ts/public-offering-catalog'
 import {OrganizationRegistrationWallet} from '../dist/organization-registration-wallet.js'
 import {readFile} from 'node:fs/promises'
 import test from 'node:test'
@@ -39,7 +40,7 @@ function makeOptions(stored = profile, seed = wallet.walletSeed) {
   }
 }
 
-test('opens existing custody and submits and polls an independently signed employee search',async()=>{
+test('opens existing custody for encrypted employee search and approved catalogue publication',async()=>{
   const options = makeOptions()
   const controllerKey = wallet.publicJwks.find(key => key.kty === 'OKP')
   const gatewayWallet = new OrganizationRegistrationWallet({resolveRecipientJwk:async did=>{
@@ -53,6 +54,12 @@ test('opens existing custody and submits and polls an independently signed emplo
     {id:`${providerDid}#${keys.encryption.kid}`,controller:providerDid,type:'JsonWebKey2020',publicKeyJwk:keys.encryption},
   ]
   const route = `/${safe.tenantId}/cds-ES-MD/v1/health-care/entity/org.schema/Employee/_search`
+  const catalogRoute = `/${safe.tenantId}/cds-ES-MD/v1/health-care/organization/org.schema/Catalog/_upsert`
+  const operationId = safe.resourceUuid
+  const document = readPublicOfferingDraftDocument({ data: [{
+    type:'Product', id:safe.resourceUuid,
+    attributes:{name:'Tracker',description:'Test catalogue item',category:'devices',offers:[]},
+  }] })
   const requests = []
   let submittedThread
   const fetchImpl = async (input,init) => {
@@ -67,20 +74,27 @@ test('opens existing custody and submits and polls an independently signed emplo
     assert.equal(request.iss,profile.actorDid)
     assert.equal(request.aud,providerDid)
     assert.equal(request.client_id,profile.clientId)
-    if (target.pathname === route) {
+    if (target.pathname === route || target.pathname === catalogRoute) {
+      if (target.pathname === catalogRoute) {
+        assert.equal(request.thid,operationId)
+        assert.deepEqual(request.body,document)
+      }
       submittedThread = request.thid
       return Response.json({}, {status:202})
     }
     assert.equal(request.thid,submittedThread)
+    const catalogue = target.pathname === `${catalogRoute}-response`
     const response = await gatewayWallet.packForRecipientWithContext({
-      iss:profile.tenantIssuer,aud:profile.actorDid,thid:submittedThread,body:{data:[]},
+      iss:profile.tenantIssuer,aud:profile.actorDid,thid:submittedThread,
+      ...(catalogue ? {type:'org.schema.catalog-publication',body:{total:1}} : {body:{data:[]}}),
     },profile.actorDid,{context:wallet.context})
     return Response.json({response})
   }
   const client = await openRegisteredWorkforceController({...options,fetchImpl},session)
   const result = await client.searchEmployees({ email:safe.individualEmail },{intervalMs:0})
   assert.deepEqual(result.poll.body.body.data,[])
-  assert.deepEqual(requests,[route,`${route}-response`])
+  assert.deepEqual(await client.publishOfferingBatch({document,operationId},{intervalMs:0}),{total:1})
+  assert.deepEqual(requests,[route,`${route}-response`,catalogRoute,`${catalogRoute}-response`])
 })
 
 test('rejects a different verified contact, a foreign owner, a different route or altered key material',async()=>{
