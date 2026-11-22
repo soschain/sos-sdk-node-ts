@@ -4,6 +4,8 @@
 
 - Carry controller age reviews through the authenticated Demo peer and return
   the review receipt without exposing the controller or any evidence files.
+- Accept independent dependent reviews and additional age thresholds without
+  accepting a holder identity from the portal.
 
 - Keep the current approved Proof of Age review in the transactional vault.
   Require verified reviewer and holder context, and reject stale replacements.

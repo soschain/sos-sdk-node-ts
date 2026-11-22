@@ -228,7 +228,13 @@ export type PortalDemoSubjectEvidenceProvider=Readonly<{
  submit(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;command:PendingSubjectEvidenceCommand;documents:readonly PendingSubjectEvidenceUploadDocument[]}>):Promise<PendingSubjectEvidenceReceipt>
  read(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;registrationId:string}>):Promise<PendingSubjectEvidenceReceipt>
 }>
-export type PortalDemoSubjectAgeReview=Readonly<{registrationId:string;reviewId:string;over18:boolean}>
+export type PortalDemoSubjectAgeReview=Readonly<{
+ registrationId:string
+ reviewId:string
+ over18:boolean
+ target?:'controller'|'subject'
+ additionalThresholds?:readonly Readonly<{threshold:number;result:boolean}>[]
+}>
 export type PortalDemoSubjectAgeReviewProvider=(input:Readonly<{
  scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;review:PortalDemoSubjectAgeReview
 }>)=>Promise<Readonly<{reviewId:string}>>
@@ -408,11 +414,27 @@ function registrationIdentifier(input:unknown):string{
  return input
 }
 export function normalizePortalDemoSubjectAgeReview(input:unknown):PortalDemoSubjectAgeReview{
- if(!input||typeof input!=='object'||Object.keys(input).length!==3||
+ const invalid=()=>new TypeError('subject_registration_age_review_invalid')
+ if(!input||typeof input!=='object'||Array.isArray(input)||
+   Object.keys(input).some(key=>!['registrationId','reviewId','over18','target','additionalThresholds'].includes(key))||
    !('registrationId' in input)||!('reviewId' in input)||!('over18' in input)||typeof input.over18!=='boolean'){
-  throw new TypeError('subject_registration_age_review_invalid')
+  throw invalid()
  }
- return {registrationId:registrationIdentifier(input.registrationId),reviewId:registrationIdentifier(input.reviewId),over18:input.over18}
+ const target='target' in input?input.target:undefined
+ if(target!==undefined&&target!=='controller'&&target!=='subject')throw invalid()
+ const base:PortalDemoSubjectAgeReview={registrationId:registrationIdentifier(input.registrationId),reviewId:registrationIdentifier(input.reviewId),over18:input.over18,...(target===undefined?{}:{target})}
+ if(!('additionalThresholds' in input))return base
+ const thresholds=input.additionalThresholds
+ if(!Array.isArray(thresholds)||thresholds.length>98)throw invalid()
+ const seen=new Set([18])
+ const additionalThresholds=thresholds.map(entry=>{
+  if(!entry||typeof entry!=='object'||Object.keys(entry).length!==2||
+    !Number.isSafeInteger(entry.threshold)||entry.threshold<1||entry.threshold>99||
+    seen.has(entry.threshold)||typeof entry.result!=='boolean')throw invalid()
+  seen.add(entry.threshold)
+  return {threshold:entry.threshold as number,result:entry.result as boolean}
+ })
+ return {...base,additionalThresholds}
 }
 async function boundedEvidenceText(request:Request):Promise<string>{
  const reader=request.body?.getReader(),chunks:Uint8Array[]=[]
