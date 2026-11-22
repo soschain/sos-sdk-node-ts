@@ -4,6 +4,8 @@
 
 - Keep the current approved Proof of Age review in the transactional vault.
   Require verified reviewer and holder context, and reject stale replacements.
+- Scope Demo approvals to the workspace generation so a reset invalidates
+  access to prior approvals.
 
 - Authorize a Proof of Age wallet offer using the individual member's
   registered device and tenant without sending evidence claims.

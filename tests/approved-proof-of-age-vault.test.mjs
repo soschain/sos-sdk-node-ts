@@ -14,15 +14,17 @@ test('binds the reviewed claim to its tenant, holder and latest revision', async
   const reviewId = randomUUID()
   let now = Date.now()
   const projection = {docType:ProofOfAgeMdocType,namespaces:{[ProofOfAgeMdocType]:{[proofOfAgeAttribute(18)]:true}}}
-  const identity = {tenantVaultId, holderReference}
+  const identity = {tenantVaultId, holderReference, generationId:randomUUID()}
   const writer = {}
   const reader = {}
   const otherReader = {}
   const otherHolder = {}
+  const replacedWorkspace = {}
   const authority = new Map([
     [reader, identity],
     [otherReader, {...identity, tenantVaultId:examples.demoOrganizationUuids.animalCare}],
     [otherHolder, {...identity, holderReference:examples.resourceUuid}],
+    [replacedWorkspace, {...identity, generationId:randomUUID()}],
   ])
   let review = {...identity, revision:reviewId, expiresAt:now + 60_000, projection}
   const vault = new ApprovedProofOfAgeVault({
@@ -37,6 +39,7 @@ test('binds the reviewed claim to its tenant, holder and latest revision', async
   assert.deepEqual(await vault.read(reader), {revision:reviewId, projection})
   assert.equal(await vault.read(otherReader), undefined)
   assert.equal(await vault.read(otherHolder), undefined)
+  assert.equal(await vault.read(replacedWorkspace), undefined)
   assert.equal(await vault.read({}), undefined)
   assert.equal(await vault.record(writer, reviewId), reviewId)
 

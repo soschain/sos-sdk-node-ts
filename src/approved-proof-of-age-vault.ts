@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { TransactionalVaultRepository } from './transactional-vault.js'
 
-type Holder = Readonly<{ tenantVaultId: string; holderReference: string }>
+type Holder = Readonly<{ tenantVaultId: string; holderReference: string; generationId?: string }>
 type Projection = Readonly<{
   docType: string
   namespaces: Readonly<Record<string, Readonly<Record<string, boolean>>>>
@@ -14,8 +14,12 @@ type Review = Holder & Readonly<{ revision: string; replaces?: string }> & (
 type StoredReview = Pick<Review, 'revision' | 'replaces' | 'expiresAt' | 'projection'> & { id: string }
 
 const collection = 'approved-proof-of-age-reviews'
-const holderKey = ({tenantVaultId, holderReference}: Holder) =>
-  createHash('sha256').update(JSON.stringify([tenantVaultId, holderReference])).digest('hex')
+const holderKey = ({tenantVaultId, holderReference, generationId}: Holder) => {
+  const binding = generationId === undefined
+    ? [tenantVaultId, holderReference]
+    : [tenantVaultId, holderReference, generationId]
+  return createHash('sha256').update(JSON.stringify(binding)).digest('hex')
+}
 
 /** Uses the same transactional port in Demo and in the hosted issuer. Both
  * authority callbacks must resolve current, server-verified identities. */
