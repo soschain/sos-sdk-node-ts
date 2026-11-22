@@ -9,9 +9,7 @@ export type PrepareProfessionalWalletOfferOptions = Readonly<{
   route: RouteContext
   profile: Readonly<{clientId: string; actorDid: string; role: string}>
   signPresentation: (input: Readonly<{clientId: string; payload: Record<string, unknown>}>) => Promise<string>
-  issuer: Readonly<{
-    requestWalletCredentialOffer(authorizationReference: string): Promise<PreparedProfessionalWalletOffer>
-  }>
+  credentialIssuer?: string
   allowLoopbackHttp?: boolean
   fetch?: typeof globalThis.fetch
 }>
@@ -34,6 +32,14 @@ function authorizationUrl(options: PrepareProfessionalWalletOfferOptions): URL {
 /** Prepares the wallet offer from an authenticated, unlocked registered professional profile. */
 export async function prepareProfessionalWalletOffer(options: PrepareProfessionalWalletOfferOptions): Promise<PreparedProfessionalWalletOffer> {
   const endpoint = authorizationUrl(options)
+  const issuerPath = endpoint.pathname.slice(0, -'/_authorize'.length)
+  const issuer = new URL(options.credentialIssuer ?? issuerPath, endpoint)
+  const loopback = endpoint.hostname === 'localhost' || endpoint.hostname === '127.0.0.1'
+  const localTlsProxy = options.allowLoopbackHttp && loopback && issuer.hostname === endpoint.hostname
+  if (issuer.protocol !== 'https:' || issuer.pathname !== issuerPath || issuer.search || issuer.hash
+    || issuer.username || issuer.password || (issuer.origin !== endpoint.origin && !localTlsProxy)) {
+    throw new TypeError('Professional wallet offers must use the trusted HTTPS tenant issuer')
+  }
   const {clientId, actorDid, role} = options.profile
   if (!clientId || !actorDid || !role) throw new TypeError('A registered professional and role are required')
   const now = Math.floor(Date.now() / 1000)
@@ -52,10 +58,12 @@ export async function prepareProfessionalWalletOffer(options: PrepareProfessiona
     body: JSON.stringify({client_id: clientId, vp_token: vpToken}),
   })
   if (response.status !== 201) throw new Error(`Professional wallet authorization failed with HTTP ${response.status}`)
-  const result = await response.json() as {authorization_reference?: unknown} | null
-  const reference = result?.authorization_reference
-  if (typeof reference !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(reference)) {
-    throw new Error('Invalid professional wallet authorization result')
+  const result = await response.json() as {offerUri?: unknown; transactionCode?: unknown} | null
+  const prefix = issuer.href + '/credential-offers/'
+  if (typeof result?.offerUri !== 'string' || !result.offerUri.startsWith(prefix)
+    || !/^[A-Za-z0-9_-]{43}$/u.test(result.offerUri.slice(prefix.length))
+    || typeof result.transactionCode !== 'string' || !/^\d{6}$/u.test(result.transactionCode)) {
+    throw new Error('Invalid professional wallet offer from the tenant')
   }
-  return options.issuer.requestWalletCredentialOffer(reference)
+  return {offerUri: result.offerUri, transactionCode: result.transactionCode}
 }

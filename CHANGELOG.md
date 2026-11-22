@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Prepare the professional wallet offer directly from the employing tenant.
+  Validate the returned offer URL against its exact HTTPS tenant issuer.
+
 - Open workforce transport from an existing unlocked organization controller
   profile and verified account contact. Bind the profile to the configured
   host, tenant, registered device and wallet keys before resolving a DID.
