@@ -100,6 +100,9 @@
   independent sealed organization P-256 keys and public-only JWKS. Verify ES256
   signatures from complete numeric, compact and signed-file inputs against
   configured issuers with bounded decoding. Profile/PQ signing remains separate.
+- Prepare a professional wallet offer from an unlocked registered profile.
+  Send the signed authorization only to its gateway and forward the opaque
+  result through the issuer client.
 
 ## 0.6.0
 

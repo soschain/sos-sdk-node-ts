@@ -1,0 +1,61 @@
+import {randomUUID} from 'node:crypto'
+import type {RouteContext} from 'sos-data-utils-ts/gateway-transport-contract'
+import {buildProfessionalEmployeeCredential} from 'sos-data-utils-ts/professional-smart'
+
+export type PreparedProfessionalWalletOffer = Readonly<{offerUri: string; transactionCode: string}>
+
+export type PrepareProfessionalWalletOfferOptions = Readonly<{
+  gatewayBaseUrl: string
+  route: RouteContext
+  profile: Readonly<{clientId: string; actorDid: string; role: string}>
+  signPresentation: (input: Readonly<{clientId: string; payload: Record<string, unknown>}>) => Promise<string>
+  issuer: Readonly<{
+    requestWalletCredentialOffer(authorizationReference: string): Promise<PreparedProfessionalWalletOffer>
+  }>
+  allowLoopbackHttp?: boolean
+  fetch?: typeof globalThis.fetch
+}>
+
+function authorizationUrl(options: PrepareProfessionalWalletOfferOptions): URL {
+  const base = new URL(options.gatewayBaseUrl)
+  const loopback = base.hostname === 'localhost' || base.hostname === '127.0.0.1'
+  if ((base.protocol !== 'https:' && !(base.protocol === 'http:' && loopback && options.allowLoopbackHttp))
+    || base.username || base.password || base.pathname !== '/' || base.hash || base.search) {
+    throw new TypeError('Professional wallet authorization requires a trusted HTTPS gateway origin')
+  }
+  const {tenantId, jurisdiction, sector} = options.route
+  if (!/^[A-Za-z0-9_-]{1,100}$/u.test(tenantId) || tenantId === 'host'
+    || !/^[A-Z]{2}(?:-[A-Z0-9]{1,3})?$/u.test(jurisdiction) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(sector)) {
+    throw new TypeError('Professional wallet authorization requires a tenant route')
+  }
+  return new URL(`/${tenantId}/cds-${jurisdiction}/v1/${sector}/identity/openid/wallet/_authorize`, base)
+}
+
+/** Prepares the wallet offer from an authenticated, unlocked registered professional profile. */
+export async function prepareProfessionalWalletOffer(options: PrepareProfessionalWalletOfferOptions): Promise<PreparedProfessionalWalletOffer> {
+  const endpoint = authorizationUrl(options)
+  const {clientId, actorDid, role} = options.profile
+  if (!clientId || !actorDid || !role) throw new TypeError('A registered professional and role are required')
+  const now = Math.floor(Date.now() / 1000)
+  const vpToken = await options.signPresentation({clientId, payload: {
+    iss: clientId,
+    client_id: clientId,
+    aud: endpoint.href,
+    jti: randomUUID(),
+    iat: now,
+    exp: now + 480,
+    vp: {holder: clientId, verifiableCredential: [buildProfessionalEmployeeCredential({actorDid, role})]},
+  }})
+  const response = await (options.fetch ?? fetch)(endpoint, {
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000),
+    headers: {accept: 'application/json', 'content-type': 'application/json'},
+    body: JSON.stringify({client_id: clientId, vp_token: vpToken}),
+  })
+  if (response.status !== 201) throw new Error(`Professional wallet authorization failed with HTTP ${response.status}`)
+  const result = await response.json() as {authorization_reference?: unknown} | null
+  const reference = result?.authorization_reference
+  if (typeof reference !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(reference)) {
+    throw new Error('Invalid professional wallet authorization result')
+  }
+  return options.issuer.requestWalletCredentialOffer(reference)
+}
