@@ -228,10 +228,14 @@ export type PortalDemoSubjectEvidenceProvider=Readonly<{
  submit(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;command:PendingSubjectEvidenceCommand;documents:readonly PendingSubjectEvidenceUploadDocument[]}>):Promise<PendingSubjectEvidenceReceipt>
  read(input:Readonly<{scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;registrationId:string}>):Promise<PendingSubjectEvidenceReceipt>
 }>
+export type PortalDemoSubjectAgeReview=Readonly<{registrationId:string;reviewId:string;over18:boolean}>
+export type PortalDemoSubjectAgeReviewProvider=(input:Readonly<{
+ scope:DemoWorkspaceScope;participant:PortalDemoCareParticipant;review:PortalDemoSubjectAgeReview
+}>)=>Promise<Readonly<{reviewId:string}>>
 const EVIDENCE_TRANSFER_HEADER='x-portal-evidence-transfer'
 // Each file rounds independently; reserve separate bounded JSON/metadata overhead.
 const EVIDENCE_TRANSFER_LIMIT=PendingSubjectEvidencePolicy.maxFiles*4*Math.ceil(PendingSubjectEvidencePolicy.maxFileBytes/3)+64*1024
-export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory;clinicalDocumentProviderFactory?:PortalDemoClinicalDocumentProviderFactory;careInboxProvider?:PortalDemoCareInboxProvider;consentProviderFactory?:PortalDemoConsentProviderFactory;catalogProvider?:PortalDemoCatalogProvider;registrationProvider?:PortalDemoRegistrationProvider;registrationReadProvider?:PortalDemoRegistrationReadProvider;subjectEvidenceProvider?:PortalDemoSubjectEvidenceProvider}>) {
+export function createPortalDemoExchangeHandler(options:Readonly<{exchange:PortalDemoExchange;scope:DemoWorkspaceScope;bearer:string;careProviderFactory?:PortalDemoCareProviderFactory;clinicalDocumentProviderFactory?:PortalDemoClinicalDocumentProviderFactory;careInboxProvider?:PortalDemoCareInboxProvider;consentProviderFactory?:PortalDemoConsentProviderFactory;catalogProvider?:PortalDemoCatalogProvider;registrationProvider?:PortalDemoRegistrationProvider;registrationReadProvider?:PortalDemoRegistrationReadProvider;subjectEvidenceProvider?:PortalDemoSubjectEvidenceProvider;subjectAgeReviewProvider?:PortalDemoSubjectAgeReviewProvider}>) {
   const authorized=serviceCredential(options.bearer)
   collections(options.scope)
   return async(request:Request):Promise<Response>=>{
@@ -242,10 +246,17 @@ export function createPortalDemoExchangeHandler(options:Readonly<{exchange:Porta
       const declaredLength=request.headers.get('content-length')
       if(evidenceTransfer&&declaredLength!==null&&(!/^\d+$/u.test(declaredLength)||Number(declaredLength)>EVIDENCE_TRANSFER_LIMIT))return Response.json({error:'subject_registration_evidence_too_large'},{status:413})
       const text=evidenceTransfer?await boundedEvidenceText(request):await request.text();if(!evidenceTransfer&&Buffer.byteLength(text)>32_768) return Response.json({error:'demo_exchange_request_too_large'},{status:413})
-      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;clinicalDocument:PortalClinicalDocumentOperation;consent:PortalDemoConsentOperation;catalog:OrganizationCatalogVaultOperation;command:unknown;registrationId:string;documents:unknown}
+      const body=JSON.parse(text) as {operation:string;scope:DemoWorkspaceScope;cardNumber:string;subjectIdentifier:string;event:PortalRtcCallEvent;participant:PortalDemoCareParticipant;care:PortalCareOperation;clinicalDocument:PortalClinicalDocumentOperation;consent:PortalDemoConsentOperation;catalog:OrganizationCatalogVaultOperation;command:unknown;registrationId:string;documents:unknown;review:unknown}
       if(evidenceTransfer&&body.operation!=='submitSubjectEvidence')throw new TypeError('subject_registration_evidence_transfer_invalid')
       collections(body.scope)
       if(body.scope.key!==options.scope.key) return Response.json({error:'demo_exchange_scope_forbidden'},{status:403})
+      if(body.operation==='recordSubjectAgeReview'){
+        if(!options.subjectAgeReviewProvider)return Response.json({error:'subject_registration_age_review_unavailable'},{status:503})
+        validateVerifiedPhone(body.participant?.verifiedPhone)
+        const review=normalizePortalDemoSubjectAgeReview(body.review)
+        const result=await options.subjectAgeReviewProvider({scope:body.scope,participant:body.participant,review})
+        return Response.json({result:{reviewId:result.reviewId}},{headers:{'cache-control':'no-store'}})
+      }
       if(body.operation==='submitSubjectEvidence'||body.operation==='readSubjectEvidence'){
         if(!options.subjectEvidenceProvider)throw new Error('subject_registration_evidence_provider_unavailable')
         validateVerifiedPhone(body.participant?.verifiedPhone)
@@ -371,6 +382,12 @@ export class PortalDemoExchangeClient {
     if(result.registrationId!==registrationId)throw new TypeError('subject_registration_evidence_receipt_invalid')
     return result
   }
+  async recordSubjectAgeReview(scope:DemoWorkspaceScope,participant:PortalDemoCareParticipant,input:PortalDemoSubjectAgeReview){
+    const review=normalizePortalDemoSubjectAgeReview(input)
+    const result=await this.call<{reviewId:string}>({operation:'recordSubjectAgeReview',scope,participant,review})
+    if(result?.reviewId!==review.reviewId)throw new TypeError('subject_registration_age_review_receipt_invalid')
+    return {reviewId:result.reviewId}
+  }
   listEvents(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoParticipant):Promise<PortalRtcCallEvent[]> {return this.call({operation:'listEvents',scope,subjectIdentifier,participant})}
   async submitEvent(scope:DemoWorkspaceScope,event:PortalRtcCallEvent,participant:PortalDemoParticipant):Promise<void> {await this.call({operation:'submitEvent',scope,event,participant})}
   care(scope:DemoWorkspaceScope,subjectIdentifier:string,participant:PortalDemoCareParticipant,care:PortalCareOperation):Promise<PortalCareOperationResult>{return this.call({operation:'care',scope,subjectIdentifier,participant,care})}
@@ -389,6 +406,13 @@ export class PortalDemoExchangeClient {
 function registrationIdentifier(input:unknown):string{
  if(typeof input!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(input))throw new TypeError('subject_registration_evidence_identifier_invalid')
  return input
+}
+export function normalizePortalDemoSubjectAgeReview(input:unknown):PortalDemoSubjectAgeReview{
+ if(!input||typeof input!=='object'||Object.keys(input).length!==3||
+   !('registrationId' in input)||!('reviewId' in input)||!('over18' in input)||typeof input.over18!=='boolean'){
+  throw new TypeError('subject_registration_age_review_invalid')
+ }
+ return {registrationId:registrationIdentifier(input.registrationId),reviewId:registrationIdentifier(input.reviewId),over18:input.over18}
 }
 async function boundedEvidenceText(request:Request):Promise<string>{
  const reader=request.body?.getReader(),chunks:Uint8Array[]=[]

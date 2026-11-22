@@ -11,6 +11,18 @@ const bearer='synthetic-pending-evidence-peer-credential'
 const scope=buildDemoWorkspaceScope({deployment:'test',network:'demo',portalFamily:safe.tenantId,tenantId:`demo-${safe.tenantId}`})
 const command={operationId:safe.resourceUuid,registrationId:safe.resourceUuid,verificationMethod:'sripp',subject:{},controller:{}}
 const participant={actorIdentifier:`urn:uuid:${safe.resourceUuid}`}
+test('sends a reviewed age decision through the authenticated peer without client-selected holder claims',async()=>{
+ const review={registrationId:safe.resourceUuid,reviewId:safe.demoOrganizationUuids.healthCare,over18:true}
+ let calls=0
+ const handler=createPortalDemoExchangeHandler({exchange:new PortalDemoExchange({store:new TransactionalMemoryVaultRepository()}),scope,bearer,subjectAgeReviewProvider:async input=>{
+  calls++;assert.deepEqual(input.review,review);assert.deepEqual(input.participant,participant)
+  return {reviewId:review.reviewId}
+ }})
+ const client=new PortalDemoExchangeClient({baseUrl:'http://localhost',bearer,fetchImpl:async(url,init)=>handler(new Request(url,init))})
+ assert.deepEqual(await client.recordSubjectAgeReview(scope,participant,review),{reviewId:review.reviewId})
+ await assert.rejects(client.recordSubjectAgeReview(scope,participant,{...review,holderReference:safe.didWeb}),/invalid/u)
+ assert.equal(calls,1)
+})
 test('transfers more than an ordinary envelope as actual bytes and reads its pending metadata',async()=>{
  const bytes=new Uint8Array(2*1024*1024).fill(65)
  const receipt={evidenceId:safe.resourceUuid,registrationId:safe.resourceUuid,status:'pending',documents:[{slot:'subject',contentId:buildSha3_384EvidenceContentIdFromDigest(createHash('sha3-384').update(bytes).digest()),mediaType:'application/pdf',fileName:'subject.pdf',size:bytes.length}]}

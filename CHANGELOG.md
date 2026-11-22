@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Carry controller age reviews through the authenticated Demo peer and return
+  the review receipt without exposing the controller or any evidence files.
+
 - Keep the current approved Proof of Age review in the transactional vault.
   Require verified reviewer and holder context, and reject stale replacements.
 - Scope Demo approvals to the workspace generation so a reset invalidates
