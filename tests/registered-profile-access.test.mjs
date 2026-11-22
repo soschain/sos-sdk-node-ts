@@ -38,6 +38,8 @@ const canonicalScope=buildScopeSmartCompositionAccess({subjectDid:patient,access
 const requestedCrud=buildScopeSmartCompositionAccess({subjectDid:alias,accessVerb:'cruds'})
 const canonicalCrud=buildScopeSmartCompositionAccess({subjectDid:patient,accessVerb:'cruds'})
 const baseUrl=safe.httpsBaseUrl,smartPath=`/${route.tenantId}/cds-${route.jurisdiction}/v1/${route.sector}/identity/openid/smart/token`
+const walletIssuer=`${baseUrl}/${route.tenantId}/cds-${route.jurisdiction}/v1/${route.sector}/identity/openid/wallet`
+const ageOffer={offerUri:`${walletIssuer}/credential-offers/${Buffer.alloc(32,17).toString('base64url')}`,transactionCode:'000001'}
 const accountToken='synthetic-host-verified-account-token'
 
 const defaultBinding=binding
@@ -77,9 +79,23 @@ async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg,member=false,m
  const openedProbe=await peer.unpackWithContext(probe,{context:peerContext})
  assert.equal(await crypto.verifyJws(openedProbe.meta.jws.compact,clientSigning),true)
  let now=1794614400000,fault='',gate,release,started,directoryGate,releaseDirectory,startedDirectory
- const requests=[],jobs=new Map()
- const state={requests,setFault:value=>{fault=value},advance:ms=>{now+=ms},holdSmart(){gate=new Promise(resolve=>{release=resolve});return new Promise(resolve=>{started=resolve})},releaseSmart(){release?.()},holdDirectory(){directoryGate=new Promise(resolve=>{releaseDirectory=resolve});return new Promise(resolve=>{startedDirectory=resolve})},releaseDirectory(){releaseDirectory?.()}}
+ const requests=[],ageRequests=[],jobs=new Map()
+ const state={requests,ageRequests,setFault:value=>{fault=value},advance:ms=>{now+=ms},holdSmart(){gate=new Promise(resolve=>{release=resolve});return new Promise(resolve=>{started=resolve})},releaseSmart(){release?.()},holdDirectory(){directoryGate=new Promise(resolve=>{releaseDirectory=resolve});return new Promise(resolve=>{startedDirectory=resolve})},releaseDirectory(){releaseDirectory?.()}}
  async function fetchImpl(url,options){
+  if(String(url)===walletIssuer+'/_authorize-proof-of-age'){
+   const request=JSON.parse(options.body)
+   assert.deepEqual(Object.keys(request),['client_id','vp_token'])
+   const [header,payload,signature]=request.vp_token.split('.')
+   const signer=publicJwks.find(jwk=>jwk.kid===JSON.parse(Buffer.from(header,'base64url')).kid)
+   assert.ok(signer)
+   assert.equal(verify('sha384',Buffer.from(`${header}.${payload}`),{key:createPublicKey({key:signer,format:'jwk'}),dsaEncoding:'ieee-p1363'},Buffer.from(signature,'base64url')),true)
+   const claims=JSON.parse(Buffer.from(payload,'base64url'))
+   assert.equal(claims.aud,walletIssuer+'/_authorize-proof-of-age')
+   assert.equal(claims.iss,clientId)
+   assert.ok(getMatchingIndividualMemberCredentialFromVpToken(request.vp_token,{actorDid,subjectDid:patient,relationship:memberRelationship}))
+   ageRequests.push(claims.jti)
+   return Response.json(ageOffer,{status:201})
+  }
   assert.equal(options.method,'POST');assert.equal(options.headers.Authorization,`Bearer ${accountToken}`)
   assert.equal(options.headers['Content-Type'],'application/x-www-form-urlencoded')
   const compact=new URLSearchParams(options.body).get('request');assert.ok(compact)
@@ -176,6 +192,18 @@ async function fixture(t,{smartAlg='ML-DSA-44',policyAlg=smartAlg,member=false,m
 }
 async function begin(t,options){const f=await fixture(t,options),{RegisteredProfileAccess}=await load(),access=new RegisteredProfileAccess(f.options);const actor=await access.unlockActorProfile({...f.binding,pin});return {...f,access,sessionId:actor.sessionId}}
 const request=(sessionId)=>({...binding,sessionId,idToken:accountToken})
+
+test('uses a fresh registered presentation for a current Proof of Age offer without opening SMART access',async t=>{
+ const f=await begin(t,{member:true})
+ const args={...f.binding,sessionId:f.sessionId,idToken:accountToken,verifiedContact:{email:safe.firstContactEmail},subjectDid:alias}
+ assert.deepEqual(await f.access.requestProofOfAgeOffer(args),ageOffer)
+ assert.equal(f.state.ageRequests.length,1)
+ assert.equal((await f.vault.get(sessions,f.sessionId)).sealedAccessToken,undefined)
+ await assert.rejects(f.access.requestProofOfAgeOffer({...args,subjectDid:secondAlias}),/denied/u)
+ await f.access.lock(f.binding,f.sessionId)
+ await assert.rejects(f.access.requestProofOfAgeOffer(args))
+ assert.equal(f.state.ageRequests.length,1)
+})
 
 test('opens an existing individual member profile and forwards its protected signed presentation for scoped SMART access',async t=>{
  const f=await begin(t,{member:true,smartAlg:'ES384'}),auth={...f.binding,sessionId:f.sessionId,idToken:accountToken}

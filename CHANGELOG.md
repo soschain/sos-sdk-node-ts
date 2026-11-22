@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Authorize a Proof of Age wallet offer using the individual member's
+  registered device and tenant without sending evidence claims.
+
 ## 0.7.0 - 2026-11-22
 
 - Prepare the professional wallet offer directly from the employing tenant.
