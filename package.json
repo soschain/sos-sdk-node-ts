@@ -190,7 +190,7 @@
   },
   "dependencies": {
     "@simplewebauthn/server": "13.3.2",
-    "antifraud-data-utils-ts": "0.4.4",
+    "antifraud-data-utils-ts": "0.4.6",
     "express": "4.22.3",
     "fhir-data-utils-ts": "0.8.0",
     "livekit-server-sdk": "2.19.2",
