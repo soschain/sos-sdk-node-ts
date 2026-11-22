@@ -11,6 +11,7 @@ import {RegisteredGatewayTransport,createVerifiedGatewaySecureAdapter} from './r
 import {openRegisteredCommunicationWallet} from './registered-communication-wallet.js'
 import {SosGatewaySubjectDirectoryClient,type AuthorizedIndividualSubject,type AuthorizedSubjectVerifiedContact} from './subject-card-directory-client.js'
 import type {RegisteredSmartTokenAlgorithm} from './registered-did-keys.js'
+import {prepareIndividualAgeWalletOffer} from './professional-wallet-offer.js'
 
 export type RegisteredProfileAccessOptions=RegisteredProfileSessionsOptions&Readonly<{
  gateway:Readonly<{
@@ -203,6 +204,27 @@ export class RegisteredProfileAccess{
   const opened=await this.opened(input),subjects=await this.queryAuthorizedSubjects(input,opened)
   await this.commit(opened)
   return subjects
+ }
+ /** Uses the current signed directory and the sealed registered device lease. */
+ async requestProofOfAgeOffer(input:AuthInput&Readonly<{
+  verifiedContact:AuthorizedSubjectVerifiedContact;subjectDid:string;credentialIssuer?:string;allowLoopbackHttp?:boolean
+ }>){
+  const opened=await this.opened(input)
+  const subjectDid=text(input.subjectDid)
+  const subjects=await this.queryAuthorizedSubjects(input,opened)
+  const subject=subjects.find(candidate=>candidate.subjectDid===subjectDid)
+  if(!subject?.role)throw denied()
+  await this.commit(opened)
+  const offer=await prepareIndividualAgeWalletOffer({
+   gatewayBaseUrl:this.baseUrl,
+   route:opened.profile.routeContext,
+   profile:{clientId:opened.profile.clientId,actorDid:opened.profile.actorDid,
+    subjectDid:text(subject.subjectClaims['org.schema.Organization.did']),relationship:subject.role},
+   signPresentation:opened.custody.signActorPresentationJws,
+   credentialIssuer:input.credentialIssuer,allowLoopbackHttp:input.allowLoopbackHttp,fetch:this.options.fetchImpl,
+  })
+  await this.commit(opened)
+  return offer
  }
  async refreshAuthorizedSubjects(input:AuthInput&Readonly<{verifiedContact:AuthorizedSubjectVerifiedContact}>){
   const opened=await this.opened(input),subjects=await this.queryAuthorizedSubjects(input,opened)

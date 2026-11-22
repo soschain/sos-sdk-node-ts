@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Carry controller age reviews through the authenticated Demo peer and return
+  the review receipt without exposing the controller or any evidence files.
+- Accept independent dependent reviews and additional age thresholds without
+  accepting a holder identity from the portal.
+
+- Keep the current approved Proof of Age review in the transactional vault.
+  Require verified reviewer and holder context, and reject stale replacements.
+- Scope Demo approvals to the workspace generation so a reset invalidates
+  access to prior approvals.
+
+- Authorize a Proof of Age wallet offer using the individual member's
+  registered device and tenant without sending evidence claims.
+
 ## 0.7.0 - 2026-11-22
 
 - Prepare the professional wallet offer directly from the employing tenant.

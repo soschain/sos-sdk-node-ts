@@ -56,3 +56,4 @@ export * from './portal-demo-clinical-author-context.js'
 export * from './did-web-key-agreement.js'
 
 export * from './professional-wallet-offer.js';
+export * from './approved-proof-of-age-vault.js';

@@ -7,7 +7,10 @@ import {createServer} from 'node:http'
 import test from 'node:test'
 import {REPOSITORY_SAFE_EXAMPLES as e} from 'sos-data-utils-ts/repository-privacy'
 import {HealthcareActorRoles} from 'sos-data-utils-ts/healthcare-roles'
-import {prepareProfessionalWalletOffer} from '../dist/index.js'
+import * as sdk from '../dist/index.js'
+import {getIndividualMemberIdentityVC} from 'sos-data-utils-ts/individual-smart'
+
+const {prepareProfessionalWalletOffer} = sdk
 
 test('authorizes the professional profile at its tenant and accepts only an offer from that same tenant', async t => {
   const route = {tenantId: e.tenantId, jurisdiction: 'EU', sector: 'health-care'}
@@ -51,4 +54,29 @@ test('authorizes the professional profile at its tenant and accepts only an offe
   await assert.rejects(prepareProfessionalWalletOffer(options), /offer/iu)
   accept = false
   await assert.rejects(prepareProfessionalWalletOffer(options), /403/)
+})
+
+test('requests a proof of age for the unlocked member without sending evidence or age claims', async () => {
+  const route = {tenantId: e.tenantId, jurisdiction: 'EU', sector: 'health-care'}
+  const profile = {clientId: e.resourceUuid, actorDid: `${e.didWeb}:member`,
+    subjectDid: `${e.didWeb}:individual`, relationship: HealthcareActorRoles.Controller}
+  const issuer = `${e.httpsBaseUrl}/${route.tenantId}/cds-${route.jurisdiction}/v1/${route.sector}/identity/openid/wallet`
+  const reference = randomBytes(32).toString('base64url')
+  const result = {offerUri: `${issuer}/credential-offers/${reference}`, transactionCode: '000001'}
+  const proof = 'synthetic-signed-individual-proof'
+  const offer = await sdk.prepareIndividualAgeWalletOffer({
+    gatewayBaseUrl: e.httpsBaseUrl, route, profile,
+    signPresentation: async ({clientId, payload}) => {
+      assert.equal(clientId, profile.clientId)
+      assert.equal(payload.aud, issuer + '/_authorize-proof-of-age')
+      assert.deepEqual(payload.vp.verifiableCredential, [getIndividualMemberIdentityVC(profile)])
+      return proof
+    },
+    fetch: async (url, request) => {
+      assert.equal(url.href, issuer + '/_authorize-proof-of-age')
+      assert.deepEqual(JSON.parse(request.body), {client_id: profile.clientId, vp_token: proof})
+      return Response.json(result, {status: 201})
+    },
+  })
+  assert.deepEqual(offer, result)
 })
