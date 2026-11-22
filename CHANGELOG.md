@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-11-22
+
 - Prepare the professional wallet offer directly from the employing tenant.
   Validate the returned offer URL against its exact HTTPS tenant issuer.
 
