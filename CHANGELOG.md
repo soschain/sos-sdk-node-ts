@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep the current approved Proof of Age review in the transactional vault.
+  Require verified reviewer and holder context, and reject stale replacements.
+
 - Authorize a Proof of Age wallet offer using the individual member's
   registered device and tenant without sending evidence claims.
 

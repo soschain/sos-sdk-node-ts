@@ -12,6 +12,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./approved-proof-of-age-vault": {
+      "types": "./dist/approved-proof-of-age-vault.d.ts",
+      "default": "./dist/approved-proof-of-age-vault.js"
+    },
+    "./transactional-vault": {
+      "types": "./dist/transactional-vault.d.ts",
+      "default": "./dist/transactional-vault.js"
+    },
     "./did-web-key-agreement": {
       "types": "./dist/did-web-key-agreement.d.ts",
       "default": "./dist/did-web-key-agreement.js"
