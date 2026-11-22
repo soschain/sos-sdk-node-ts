@@ -419,3 +419,32 @@ than user queries and never interprets unlabelled projected coordinates as
 latitude/longitude. Composition roots may inject reviewed geographic points;
 the optional reviewed configuration parser requires an explicit WGS84 CRS and
 evidence reference. No paid geocoder is called.
+
+## Prepare a professional wallet offer
+
+Call `prepareProfessionalWalletOffer` on the server after authenticating
+the portal account and opening its registered professional profile. Resolve the
+gateway URL, tenant route, actor DID, registered client and active role from
+that server-side profile. Use its registered presentation signing operation
+and the configured issuer client from the Antifraud Node SDK.
+
+```ts
+import { prepareProfessionalWalletOffer } from 'sos-sdk-node-ts'
+
+const offer = await prepareProfessionalWalletOffer({
+  gatewayBaseUrl,
+  route: registeredProfile.routeContext,
+  profile: {
+    clientId: registeredProfile.clientId,
+    actorDid: registeredProfile.actorDid,
+    role: registeredProfessionalRole,
+  },
+  signPresentation: registeredCustody.signActorPresentationJws,
+  issuer: configuredCredentialProvider,
+})
+```
+
+Return `offerUri` and `transactionCode` only to the same authenticated
+account. Display the code separately from the offer link or QR. Keep the
+profile proof, private key, and issuer backend authentication in their
+respective custody boundaries.
