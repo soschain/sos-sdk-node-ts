@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.1 - 2026-11-23
 
 - Carry controller age reviews through the authenticated Demo peer and return
   the review receipt without exposing the controller or any evidence files.
