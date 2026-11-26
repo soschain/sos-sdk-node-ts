@@ -20,9 +20,10 @@ import type {OrganizationPurgeReceipt} from 'sos-data-utils-ts/organization-life
 import type {OrganizationWorkflowFlatEntry} from 'sos-data-utils-ts/organization-workflow-access'
 import {buildResearchStudyReviewTeamGroupSearch} from 'sos-data-utils-ts/research-review-team-identity'
 import {normalizeDirectoryFlatClaimsResource,type DirectoryResource,type DirectoryResourceType} from 'sos-data-utils-ts/place-service-directory'
-import {buildResearchStudyDatasetPublication,ClaimsHealthDcatCatalogRecord,ClaimsHealthDcatDataset,ClaimsHealthDcatDataService,
- normalizeHealthDcatResource,updateHealthDcatCatalogRecordStatus} from 'sos-data-utils-ts/health-dcat'
-import {normalizeProvenanceR5FlatClaimsResource} from 'sos-data-utils-ts/provenance'
+import {ClaimsHealthDcatCatalogRecord,normalizeHealthDcatResource,updateHealthDcatCatalogRecordStatus} from 'sos-data-utils-ts/health-dcat'
+import {planOfferingReference,planResearchStudyDatasetPublication,planReviewedOfferingBatch,
+ readOfferingHistoryReceipt,readOfferingPublicationReceipt,
+ type OfferingReferenceInput,type ResearchStudyDatasetPublicationInput} from 'sos-sdk-core-ts/catalogue-publication'
 import {readTenantPublicOfferingCatalog} from './public-offering-catalog-client.js'
 import {ClaimConsent} from 'fhir-data-utils-ts'
 import {GroupFlatClaimCatalog} from 'fhir-data-utils-ts/group-r5'
@@ -366,13 +367,21 @@ export class WorkforceClient{
 
  /** Publishes one reviewed product or service batch without replacing unrelated entries. */
  async publishOfferingBatch(input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
-  const data=input.document?.data
-  if(!Array.isArray(data)||!data.length)throw new TypeError('catalog_offering_document_invalid')
-  const type=record(data[0])?.type
-  if((type!=='Product'&&type!=='Service')||data.some(entry=>record(entry)?.type!==type)){
-   throw new TypeError('catalog_offering_batch_mixed_types')
-  }
-  return this.publishCatalogueDocument('_upsert',input,pollOptions,data.length)
+  const plan=planReviewedOfferingBatch(input)
+  return this.publishCatalogueDocument('_upsert',plan,pollOptions,plan.expectedTotal)
+ }
+
+ /** Withdraws one published listing while preserving its versions. */
+ async unpublishOffering(input:OfferingReferenceInput,pollOptions?:PollOptions){
+  return this.publishCatalogueDocument('_unpublish',planOfferingReference(input),pollOptions,1)
+ }
+
+ /** Reads the authenticated history of the specified product or service. */
+ async getOfferingHistory(input:OfferingReferenceInput,pollOptions?:PollOptions){
+  const receipt=await this.exchangeCatalogueDocument('_history',planOfferingReference(input),pollOptions)
+  const history=readOfferingHistoryReceipt(receipt,input)
+  if(!history)throw new WorkforceSubmitError(502,{error:'catalog_offering_history_receipt_invalid'})
+  return history
  }
 
  /** Reads the offerings currently published by the selected tenant, without forwarding wallet or bearer credentials. */
@@ -399,36 +408,12 @@ export class WorkforceClient{
  }
 
  /** Writes a study dataset and publishes its discoverable record only after its referenced resources succeed. */
- async publishResearchStudyDataset(input:Readonly<{
-  distribution:unknown;dataService:unknown;dataset:unknown;provenance:unknown;researchStudyIdentifier:string;
-  catalogRecordIdentifier:string;modifiedAt:string;operationId:string
- }>,pollOptions?:PollOptions){
-  const authority=this.catalogAuthority()
-  const {researchStudyIdentifier,operationId}=input
-  if(typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,180}$/u.test(operationId))throw new TypeError('workforce_catalog_operation_invalid')
-  const distribution=normalizeHealthDcatResource(input.distribution),dataService=normalizeHealthDcatResource(input.dataService)
-  const dataset=normalizeHealthDcatResource(input.dataset),provenance=normalizeProvenanceR5FlatClaimsResource(input.provenance)
-  const distributions=dataset.meta.claims[ClaimsHealthDcatDataset.distribution]
-  const served=dataService.meta.claims[ClaimsHealthDcatDataService.servesDataset]
-  if(distribution.resourceType!=='Distribution'||dataService.resourceType!=='DataService'||dataset.resourceType!=='Dataset'
-   ||!/^ResearchStudy\/[A-Za-z0-9.-]{1,64}$/u.test(researchStudyIdentifier)
-   ||!provenance.meta.claims['Provenance.target']?.includes(researchStudyIdentifier)
-   ||dataset.meta.claims[ClaimsHealthDcatDataset.source]!==researchStudyIdentifier
-   ||dataset.meta.claims[ClaimsHealthDcatDataset.publisher]!==authority.organizationIdentifier
-   ||dataService.meta.claims[ClaimsHealthDcatDataService.publisher]!==authority.organizationIdentifier
-   ||!Array.isArray(distributions)||!distributions.includes(distribution.id)||!Array.isArray(served)||!served.includes(dataset.id)){
-   throw new TypeError('workforce_dataset_binding_invalid')
+ async publishResearchStudyDataset(input:ResearchStudyDatasetPublicationInput,pollOptions?:PollOptions){
+  const plan=planResearchStudyDatasetPublication(input,this.catalogAuthority())
+  for(const write of plan.writes){
+   await this.writeCatalogResource(write.format,write.resourceType,write.method,write.resource,write.operationId,pollOptions)
   }
-  const publication=buildResearchStudyDatasetPublication({...authority,dataset,researchStudyIdentifier,
-   provenanceReference:`Provenance/${provenance.id}`,catalogRecordIdentifier:input.catalogRecordIdentifier,status:'published',modifiedAt:input.modifiedAt})
-  if([distribution,dataService,publication.dataset,publication.record].some(resource=>!validCatalogWriteId('org.w3.dcat',resource.id))
-   ||!validCatalogWriteId('org.hl7.fhir.r5',provenance.id))throw new TypeError('workforce_dataset_binding_invalid')
-  await this.writeCatalogResource('org.w3.dcat','Distribution','PUT',distribution,`${operationId}-distribution`,pollOptions)
-  await this.writeCatalogResource('org.w3.dcat','DataService','PUT',dataService,`${operationId}-data-service`,pollOptions)
-  await this.writeCatalogResource('org.hl7.fhir.r5','Provenance','PUT',provenance,`${operationId}-provenance`,pollOptions)
-  await this.writeCatalogResource('org.w3.dcat','Dataset','POST',publication.dataset,`${operationId}-dataset`,pollOptions)
-  await this.writeCatalogResource('org.w3.dcat','CatalogRecord','POST',publication.record,`${operationId}-record`,pollOptions)
-  return publication
+  return plan.publication
  }
 
  /** Changes only the exact persisted CatalogRecord's editorial status. */
@@ -504,18 +489,20 @@ export class WorkforceClient{
   if(confirmed.resourceType!==resourceType)throw new Error(error)
   return {resourceId:resource.id}
  }
- private async publishCatalogueDocument(action:'_publish'|'_upsert',input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions,expectedTotal?:number){
+ private async exchangeCatalogueDocument(action:'_publish'|'_upsert'|'_unpublish'|'_history',input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions){
   const identity=this.controller(),{document,operationId}=input
   if(!record(document)||!Object.hasOwn(document,'data')||typeof operationId!=='string'||!/^[A-Za-z0-9:_.-]{1,200}$/u.test(operationId)){
    throw new TypeError('catalog_offering_document_invalid')
   }
   const path=`${this.prefix}/organization/org.schema/Catalog/${action}`
   const result=await this.transport.exchange(path,this.administrationMessage(document,operationId),identity.providerDid,pollOptions)
-  const receipt=record(result.poll.body),total=record(receipt?.body)?.total
-  if(receipt?.type!=='org.schema.catalog-publication'||typeof total!=='number'||!Number.isSafeInteger(total)||total<1||(expectedTotal!==undefined&&total!==expectedTotal)){
-   throw new WorkforceSubmitError(502,{error:'catalog_offering_publication_receipt_invalid'})
-  }
-  return {total}
+  return result.poll.body
+ }
+ private async publishCatalogueDocument(action:'_publish'|'_upsert'|'_unpublish',input:Readonly<{document:Readonly<Row>;operationId:string}>,pollOptions?:PollOptions,expectedTotal?:number){
+  const receipt=await this.exchangeCatalogueDocument(action,input,pollOptions)
+  const confirmation=readOfferingPublicationReceipt(receipt,expectedTotal)
+  if(!confirmation)throw new WorkforceSubmitError(502,{error:'catalog_offering_publication_receipt_invalid'})
+  return confirmation
  }
  /** Reads the signed roster without querying or requiring a licence. */
  getEmployeeDirectory(pollOptions?:PollOptions){

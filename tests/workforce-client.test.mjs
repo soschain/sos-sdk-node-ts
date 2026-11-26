@@ -1,4 +1,5 @@
-// Flow contract: an already opened controller wallet creates exact contact/role staff and reserves its real GW seat; recipient installation uses only Token exchange and DCR, with contact/route/role binding and authoritative errors. Loopback transport fixtures do not prove GW authorization, signature verification, ledger persistence, or a completed portal enrollment journey.
+// Flow contract: reuse shared test fixtures and canonical types; do not introduce duplicated literals.
+// A registered controller submits tenant-bound calls with correlated receipts.
 import assert from 'node:assert/strict'
 import {createServer} from 'node:http'
 import {generateKeyPairSync} from 'node:crypto'
@@ -107,6 +108,28 @@ test('submits a reviewed offering batch once and requires a receipt covering eve
   receiptTotal=1
   await assert.rejects(client.publishOfferingBatch({document,operationId},{intervalMs:0}),error=>
    error.status===502&&error.body.error==='catalog_offering_publication_receipt_invalid')
+ })
+})
+
+test('withdraws an exact offering and reads its retained versions through the signed controller transport',async()=>{
+ const reference={type:'Product',id:safe.resourceUuid}
+ const base=`/${ctx.tenantId}/cds-${ctx.jurisdiction}/v1/${ctx.sector}/organization/org.schema/Catalog`
+ await serve(async(req,res,message)=>{
+  const action=req.url.slice(base.length)
+  const history=action.startsWith('/_history')
+  const operationId=`${history?'history':'withdraw'}-${safe.resourceUuid}`
+  assert.equal(message.thid,operationId)
+  if(action=== '/_history'||action=== '/_unpublish'){
+   assert.deepEqual(message.body,{data:reference})
+   res.writeHead(202);res.end('{}');return
+  }
+  assert.equal(action,history?'/_history-response':'/_unpublish-response')
+  reply(res,{iss:providerDid,aud:controllerDid,thid:operationId,
+   ...(history?{type:'org.schema.catalog-history',body:{versions:[]}}:{type:'org.schema.catalog-publication',body:{total:1}})})
+ },async baseUrl=>{
+  const client=new WorkforceClient(options(baseUrl))
+  assert.deepEqual(await client.unpublishOffering({...reference,operationId:`withdraw-${safe.resourceUuid}`},{intervalMs:0}),{total:1})
+  assert.deepEqual(await client.getOfferingHistory({...reference,operationId:`history-${safe.resourceUuid}`},{intervalMs:0}),{versions:[]})
  })
 })
 
