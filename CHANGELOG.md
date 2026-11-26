@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2 - 2026-11-25
+
+- Withdraw one offering and retrieve its retained versions from an open,
+  registered controller session.
+
+- Reuse Core catalogue publication plans and receipt validation in the registered
+  controller client. Document secure catalogue publication and public readback.
+
 ## 0.7.1 - 2026-11-23
 
 - Carry controller age reviews through the authenticated Demo peer and return
@@ -19,12 +27,6 @@
 
 - Prepare the professional wallet offer directly from the employing tenant.
   Validate the returned offer URL against its exact HTTPS tenant issuer.
-
-- Withdraw one offering and retrieve its retained versions from an open,
-  registered controller session.
-
-- Reuse Core catalogue publication plans and receipt validation in the registered
-  controller client. Document secure catalogue publication and public readback.
 
 - Open workforce transport from an existing unlocked organization controller
   profile and verified account contact. Bind the profile to the configured
